@@ -1,97 +1,116 @@
-#include <iostream>
-#include <string>
-#include <fstream>
-#include <vector>
-#include <memory>
-#include <unordered_map>
-#include <optional>
-#include <functional>
+// Why did i make an entire CLI arg parser instead of using CLI11?
+// Partly because i'm an idiot and forgot to look at CLI11 releases (it has an all-in-one cli11.hpp), but whatever i guess
+// man_mining_for_diamonds.png
+// -a
 
-class Parser {
-public:
-    std::unordered_map<std::string, std::unique_ptr<Command>> command_registry;
-    std::string description;
+#include "CLI.hpp"
 
-    Parser(const std::string& program_description) : description(program_description) {};
-    
-    void add_command(std::unique_ptr<Command> cmd) {
-        // TODO: Implement this
+// Helper function implementation
+std::optional<std::string> parse_arguments(int argc, char* argv[], const std::vector<std::unique_ptr<Argument>>& arguments, ParsedArgs& parsed_args) {
+    int i = 0;
+    while (i < argc) {
+        std::string arg = argv[i];
+
+        bool matched = false;
+        for (auto& argument : arguments) {
+            if (argument->matches_short(arg) || argument->matches_long(arg)) {
+                // Pass the remaining arguments to the argument's parser
+                int temp_argc = argc - i;
+                char** temp_argv = argv + i;
+
+                auto result = argument->parse_from_argv(temp_argc, temp_argv, parsed_args);
+                if (result.has_value()) {
+                    return result; // Error occurred
+                }
+
+                // Calculate how many arguments were consumed and advance 'i'
+                int args_consumed = (argc - i) - temp_argc;
+                i += args_consumed; // This will be at least 1 for the option itself
+                matched = true;
+                break; // Exit inner loop after processing matched argument
+            }
+        }
+
+        if (!matched) {
+            // It might be a positional argument
+            parsed_args.positional_args.push_back(arg);
+            i++; // Advance to next command line argument if no match
+        }
+        // If there was a match, we've already incremented 'i' by the number of consumed args
     }
 
-    std::optional<std::string> parse_and_dispatch(int argc, char* argv[], Repository* repo) {
-        std::optional<std::string> res;
-        // TODO: Implement this
-        return res;
+    // Check for required arguments
+    for (auto& argument : arguments) {
+        if (argument->required && parsed_args.values.find(argument->dest_name) == parsed_args.values.end()) {
+            return "Error: Missing required argument: " + argument->dest_name;
+        }
     }
 
-    void print_help() {
-        // TODO: Implement this
-    }
-};
-
-class Command {
-public:
-    std::string name;
-    std::string help_text;
-    std::vector<std::unique_ptr<Argument>> arguments;
-    std::function<void(const ParsedArgs&, Repository*)> handler_func;
-
-    Command(
-        const std::string& cmd_name, 
-        const std::string& cmd_help_text, 
-        std::function<void(const ParsedArgs&, Repository*)> handler
-    ) : name(cmd_name), help_text(cmd_help_text), handler_func(handler) {};
-
-    void add_argument(std::unique_ptr<Argument> arg) {
-        // TODO: Implement this
+    // Add default values for optional arguments not provided
+    for (auto& argument : arguments) {
+        if (!argument->required && parsed_args.values.find(argument->dest_name) == parsed_args.values.end()) {
+            parsed_args.values[argument->dest_name] = argument->default_value;
+        }
     }
 
-    std::optional<std::string> parse(int argc, char* argv[]) {
-        std::optional<std::string> res;
-        // TODO: Implement this
-        return res;
+    return std::nullopt; // Success
+}
+
+// Parser implementation
+std::optional<std::string> Parser::parse_and_dispatch(int argc, char* argv[], Repository* repo) {
+    // If there are no arguments
+    if (argc < 2) {
+        print_help();
+        return "Error: No command provided";
     }
 
-    void call_handler(const ParsedArgs& args, Repository* repo) {
-        // TODO: Implement this
+    std::string command_name = argv[1];
+
+    // If the command is help
+    if (command_name == "--help" || command_name == "-h") {
+        print_help();
+        return std::nullopt;
     }
-};
 
-class Argument {
-public:
-    std::string dest_name;
-    std::string help_text;
-    bool required;
-    std::string default_value;
+    auto it = command_registry.find(command_name);
+    // If the command doesn't exist
+    if (it == command_registry.end()) {
+        print_help();
+        return "Error: Unknown command '" + command_name + "'";
+    }
 
-    bool is_flag;
-    std::string short_opt;
-    std::string long_opt;
+    // Adjust argc and argv to skip the program name and command name
+    // e.g. `silt commit -m "feat: Add blobs"` -> `-m "feat: Add blobs"`
+    int sub_argc = argc - 2;
+    char** sub_argv = argv + 2;
 
-    Argument(
-        const std::string& dest,
-        const std::string& help,
-        bool req,
-        const std::string& def_val,
-        bool flag = false,
-        const std::string& short_o = "",
-        const std::string& long_o = ""
-    ) : dest_name(dest), help_text(help), required(req), 
-    default_value(def_val), is_flag(flag), 
-    short_opt(short_o), long_opt(long_o) {};
-    
-    // TODO: Implement the methods
-    virtual ~Argument() = default;
-    virtual std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs* storage) = 0;
-    bool matches_short(const std::string& token);
-    bool matches_long(const std::string& token);
-};
+    // Parse arguments and store them in a ParsedArgs instance
+    ParsedArgs parsed_args;
+    auto& command = it->second;
 
-struct ParsedArgs {
-    std::unordered_map<std::string, std::string> values;
-    std::vector<std::string> positional_args;
+    // Handle help flag for the specific command
+    if (sub_argc > 0) {
+        std::string first_arg = sub_argv[0];
+        if (first_arg == "--help" || first_arg == "-h") {
+            command->print_help();
+            return std::nullopt;
+        }
+    }
 
-    // TODO: Implement Methods
-    std::string get(const std::string& key, const std::string& default_value = "");
-    bool exists(const std::string& key);
-};
+    // Use the centralized parsing function
+    auto parse_result = parse_arguments(sub_argc, sub_argv, command->arguments, parsed_args);
+    if (parse_result.has_value()) {
+        return parse_result;
+    }
+
+    command->call_handler(parsed_args, repo);
+    return std::nullopt; // Success
+}
+
+void Parser::print_help() {
+    std::cout << description << std::endl;
+    std::cout << "Available commands:" << std::endl;
+    for (const auto& pair : command_registry) {
+        std::cout << "  " << pair.first << " - " << pair.second->help_text << std::endl;
+    }
+}

@@ -1,3 +1,5 @@
+# to make, `mingw32-make -f  Makefile`
+
 # Define the compiler (use g++ from MSYS2 MinGW 64-bit)
 CXX = g++
 
