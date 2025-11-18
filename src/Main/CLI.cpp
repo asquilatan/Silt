@@ -32,7 +32,11 @@ std::optional<std::string> parse_arguments(int argc, char* argv[], const std::ve
         }
 
         if (!matched) {
-            // It might be a positional argument
+            // Check if the argument looks like a flag (starts with -) but doesn't match any defined arguments
+            if (arg.length() > 1 && arg[0] == '-') {
+                return "Error: Unknown argument '" + arg + "'";
+            }
+            // Only add to positional_args if it's not a flag-looking argument
             parsed_args.positional_args.push_back(arg);
             i++; // Advance to next command line argument if no match
         }

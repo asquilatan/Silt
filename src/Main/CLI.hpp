@@ -66,6 +66,7 @@ class ParsedArgs {
 public:
     // fields
     std::unordered_map<std::string, std::string> values;
+    std::unordered_map<std::string, std::vector<std::string>> multiple_values;
     std::vector<std::string> positional_args;
 
     // Gets the value using the key
@@ -77,9 +78,28 @@ public:
         return default_value;
     }
 
+    // Gets multiple values using the key (for nargs arguments)
+    std::vector<std::string> get_multiple(const std::string& key, const std::vector<std::string>& default_values = {}) const {
+        auto it = multiple_values.find(key);
+        if (it != multiple_values.end()) {
+            return it->second;
+        }
+        return default_values;
+    }
+
+    // Sets multiple values
+    void set_multiple(const std::string& key, const std::vector<std::string>& values) {
+        multiple_values[key] = values;
+    }
+
     // Checks if a key exists in values
     bool exists(const std::string& key) const {
         return values.find(key) != values.end();
+    }
+
+    // Checks if a multiple values key exists
+    bool exists_multiple(const std::string& key) const {
+        return multiple_values.find(key) != multiple_values.end();
     }
 };
 
@@ -138,6 +158,55 @@ public:
             // This is the last token, but it's an option that needs a value.
             return "Error: Missing value for argument " + dest_name;
         }
+    }
+};
+
+// N-argument (nargs) class for handling multiple values
+class NargsArgument : public Argument {
+public:
+    // Constructor for Nargs Argument
+    NargsArgument(
+        const std::string& dest,
+        const std::string& help,
+        bool req,
+        const std::string& def_val = "",
+        bool flag = false,
+        const std::string& short_o = "",
+        const std::string& long_o = ""
+    ) : Argument(dest, help, req, def_val, flag, short_o, long_o) {}
+
+    // Implementation of parse_from_argv for collecting multiple arguments
+    std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage) override {
+        // Skip the option itself first (consume the flag)
+        current_argc--;
+        current_argv++;
+
+        // Collect all following non-option arguments until we hit another option or run out
+        std::vector<std::string> values;
+
+        while (current_argc > 0) {
+            std::string curr_arg = current_argv[0];
+            // If the current argument is an option, stop collecting
+            if (curr_arg.rfind("-", 0) == 0) {
+                break;
+            }
+
+            values.push_back(curr_arg);
+            current_argc--;
+            current_argv++;
+        }
+
+        // Store the collected values as a comma-separated string
+        std::string combined_values;
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (i > 0) combined_values += ",";
+            combined_values += values[i];
+        }
+
+        storage.values[dest_name] = combined_values;
+        // Also store it in multiple_values map for easier access
+        storage.set_multiple(dest_name, values);
+        return std::nullopt;
     }
 };
 

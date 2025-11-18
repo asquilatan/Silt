@@ -16,7 +16,7 @@ CXXFLAGS += -Isrc/External
 CXXFLAGS += -Isrc/External/openssl
 
 # Define the name of the final executable
-TARGET = silt_cpp
+TARGET = silt
 
 # Define the source files to compile
 # List all .cpp files here
