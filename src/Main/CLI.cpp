@@ -5,6 +5,69 @@
 
 #include "CLI.hpp"
 
+std::optional<std::string> Argument::parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage) {
+    // Consume the option token itself
+    current_argc--;
+    current_argv++;
+
+    // Case 1: Flag argument (nargs == 0)
+    if (nargs == 0) {
+        storage.values[dest_name] = "true";
+        return std::nullopt;
+    }
+
+    // Case 2: Single value argument (nargs == 1)
+    if (nargs == 1) {
+        if (current_argc < 1) {
+            return "Error: Missing value for argument " + dest_name;
+        }
+
+        std::string next_arg = current_argv[0];
+        if (next_arg.rfind("-", 0) == 0) {
+            return "Error: Missing value for argument " + dest_name;
+        }
+
+        storage.values[dest_name] = next_arg;
+
+        // Consume the value
+        current_argc--;
+        current_argv++;
+        return std::nullopt;
+    }
+
+    // Case 3: Multiple value argument (nargs == -1)
+    if (nargs == -1) {
+        std::vector<std::string> collected_values;
+        while (current_argc > 0) {
+            std::string curr_arg = current_argv[0];
+            if (curr_arg.rfind("-", 0) == 0) {
+                break; // Stop at the next option
+            }
+            collected_values.push_back(curr_arg);
+            current_argc--;
+            current_argv++;
+        }
+
+        if (required && collected_values.empty()) {
+            return "Error: Missing at least one value for argument " + dest_name;
+        }
+
+        // Store for both single-string access and multi-value access
+        if (!collected_values.empty()) {
+            storage.set_multiple(dest_name, collected_values);
+            // Also combine into a single string for the 'values' map
+            std::stringstream ss;
+            for (size_t i = 0; i < collected_values.size(); ++i) {
+                if (i != 0) ss << ",";
+                ss << collected_values[i];
+            }
+            storage.values[dest_name] = ss.str();
+        }
+        return std::nullopt;
+    }
+    return "Error: Invalid 'nargs' configuration for " + dest_name;
+}
+
 // Helper function implementation
 std::optional<std::string> parse_arguments(int argc, char* argv[], const std::vector<std::unique_ptr<Argument>>& arguments, ParsedArgs& parsed_args) {
     int i = 0;
@@ -14,18 +77,17 @@ std::optional<std::string> parse_arguments(int argc, char* argv[], const std::ve
         bool matched = false;
         for (auto& argument : arguments) {
             if (argument->matches_short(arg) || argument->matches_long(arg)) {
-                // Pass the remaining arguments to the argument's parser
-                int temp_argc = argc - i;
-                char** temp_argv = argv + i;
+                // Create a temporary view of the remaining arguments
+                int remaining_argc = argc - i;
+                char** remaining_argv = argv + i;
 
-                auto result = argument->parse_from_argv(temp_argc, temp_argv, parsed_args);
+                auto result = argument->parse_from_argv(remaining_argc, remaining_argv, parsed_args);
                 if (result.has_value()) {
                     return result; // Error occurred
                 }
 
-                // Calculate how many arguments were consumed and advance 'i'
-                int args_consumed = (argc - i) - temp_argc;
-                i += args_consumed; // This will be at least 1 for the option itself
+                // Update 'i' based on how many arguments were consumed
+                i += (argc - i) - remaining_argc;
                 matched = true;
                 break; // Exit inner loop after processing matched argument
             }
@@ -40,7 +102,6 @@ std::optional<std::string> parse_arguments(int argc, char* argv[], const std::ve
             parsed_args.positional_args.push_back(arg);
             i++; // Advance to next command line argument if no match
         }
-        // If there was a match, we've already incremented 'i' by the number of consumed args
     }
 
     // Check for required arguments

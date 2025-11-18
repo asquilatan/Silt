@@ -11,55 +11,7 @@
 #include <sstream>
 
 // Forward declaration for ParsedArgs to resolve circular dependency with Argument
-class ParsedArgs;
 class Repository; // Forward declaration
-
-// Base argument class
-class Argument {
-public:
-    // fields
-    std::string dest_name;
-    std::string help_text;
-    bool required;
-    std::string default_value;
-
-    bool is_flag;
-    std::string short_opt;
-    std::string long_opt;
-
-    // constructor
-    Argument(
-        const std::string& dest,
-        const std::string& help,
-        bool req,
-        const std::string& def_val = "",
-        bool flag = false,
-        const std::string& short_o = "",
-        const std::string& long_o = ""
-    ) : dest_name(dest), help_text(help), required(req),
-    default_value(def_val), is_flag(flag),
-    short_opt(short_o), long_opt(long_o) {};
-
-    // Virtual destructor for the argument base class
-    virtual ~Argument() = default;
-
-    // Virtual function, both StringArgument and FlagArgument implement this.
-    virtual std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage) = 0;
-
-    // Checks if the token is equal to the short option
-    bool matches_short(const std::string& token) {
-        if (short_opt.empty())
-            return false;
-        return token == "-" + short_opt;
-    }
-
-    // Checks if the token is equal to the long option
-    bool matches_long(const std::string& token) {
-        if (long_opt.empty())
-            return false;
-        return token == "--" + long_opt;
-    }
-};
 
 // Parsed arguments class (was supposed to be a struct but whatever)
 class ParsedArgs {
@@ -103,132 +55,49 @@ public:
     }
 };
 
-// Concrete argument classes
-
-// String argument, inherits from Argument
-class StringArgument : public Argument {
+// Base argument class
+class Argument {
 public:
-    // Constructor for String Argument
-    StringArgument(
+    // fields
+    std::string dest_name;
+    std::string help_text;
+    bool required;
+    int nargs; // 0 for flags, 1 for single value, -1 for multiple values
+    std::string default_value;
+
+    std::string short_opt;
+    std::string long_opt;
+
+    // constructor
+    Argument(
         const std::string& dest,
+        int num_args,
         const std::string& help,
         bool req,
         const std::string& def_val = "",
-        bool flag = false,
         const std::string& short_o = "",
         const std::string& long_o = ""
-    ) : Argument(dest, help, req, def_val, flag, short_o, long_o) {}
+    ) : dest_name(dest), help_text(help), required(req), nargs(num_args),
+    default_value(def_val), short_opt(short_o), long_opt(long_o) {};
 
-    // Implementation of parse_from_argv
-    std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage) override {
-        // If there are no given requirements (if the count is zero or negative)
-        if (current_argc <= 0) {
-            // If it is required
-            if (required) {
-                return "Error: Missing required argument for " + dest_name;
-            }
-            // If not required, it will get the default value later
-            return std::nullopt;
-        }
+    // Virtual destructor for the argument base class
+    virtual ~Argument() = default;
 
-        // For flag arguments, they don't take a value, so just set to "true"
-        if (is_flag) {
-            storage.values[dest_name] = "true";
-            return std::nullopt;
-        }
+    // Virtual function, both StringArgument and FlagArgument implement this.
+    std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage);
 
-        // For non-flag arguments, look for the next argument as the value
-        if (current_argc > 1) {
-            std::string next_arg = current_argv[1];
-            // Check if the next argument is another option. If so, this one is missing its value.
-            if (next_arg.rfind("-", 0) == 0) {
-                return "Error: Missing value for argument " + dest_name;
-            }
-
-            // If it was provided a value, replace values.dest_name with the next argument
-            storage.values[dest_name] = next_arg;
-
-            // Consume the option and its value
-            current_argc -= 2;
-            current_argv += 2;
-            return std::nullopt;
-
-        // If there is only ONE argument left (no next arg to use as value)
-        } else {
-            // This is the last token, but it's an option that needs a value.
-            return "Error: Missing value for argument " + dest_name;
-        }
+    // Checks if the token is equal to the short option
+    bool matches_short(const std::string& token) {
+        if (short_opt.empty())
+            return false;
+        return token == "-" + short_opt;
     }
-};
 
-// N-argument (nargs) class for handling multiple values
-class NargsArgument : public Argument {
-public:
-    // Constructor for Nargs Argument
-    NargsArgument(
-        const std::string& dest,
-        const std::string& help,
-        bool req,
-        const std::string& def_val = "",
-        bool flag = false,
-        const std::string& short_o = "",
-        const std::string& long_o = ""
-    ) : Argument(dest, help, req, def_val, flag, short_o, long_o) {}
-
-    // Implementation of parse_from_argv for collecting multiple arguments
-    std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage) override {
-        // Skip the option itself first (consume the flag)
-        current_argc--;
-        current_argv++;
-
-        // Collect all following non-option arguments until we hit another option or run out
-        std::vector<std::string> values;
-
-        while (current_argc > 0) {
-            std::string curr_arg = current_argv[0];
-            // If the current argument is an option, stop collecting
-            if (curr_arg.rfind("-", 0) == 0) {
-                break;
-            }
-
-            values.push_back(curr_arg);
-            current_argc--;
-            current_argv++;
-        }
-
-        // Store the collected values as a comma-separated string
-        std::string combined_values;
-        for (size_t i = 0; i < values.size(); ++i) {
-            if (i > 0) combined_values += ",";
-            combined_values += values[i];
-        }
-
-        storage.values[dest_name] = combined_values;
-        // Also store it in multiple_values map for easier access
-        storage.set_multiple(dest_name, values);
-        return std::nullopt;
-    }
-};
-
-// Flag argument, inherits from Argument
-class FlagArgument : public Argument {
-public:
-    // Constructor for Flag Argument
-    FlagArgument(
-        const std::string& dest,
-        const std::string& help,
-        const std::string& def_val = "",
-        const std::string& short_o = "",
-        const std::string& long_o = ""
-    ) : Argument(dest, help, false, def_val, true, short_o, long_o) {}
-
-    // Implementation of parse_from_argv
-    std::optional<std::string> parse_from_argv(int& current_argc, char**& current_argv, ParsedArgs& storage) override {
-        storage.values[dest_name] = "true";
-        // Consume the current argument (the flag itself)
-        current_argc--;
-        current_argv++;
-        return std::nullopt;
+    // Checks if the token is equal to the long option
+    bool matches_long(const std::string& token) {
+        if (long_opt.empty())
+            return false;
+        return token == "--" + long_opt;
     }
 };
 

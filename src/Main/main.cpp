@@ -107,17 +107,20 @@ int main(int argc, char* argv[]) {
     );
 
     // Add arguments to the "add" command
-    add_cmd->add_argument(std::make_unique<StringArgument>(
+    add_cmd->add_argument(std::make_unique<Argument>(
         "file",              // dest_name
+        1,                   // nargs (takes 1 value)
         "Specify file to add",  // help_text
         false,               // required
         "."                  // default_value
     ));
 
     // add verbose to add
-    add_cmd->add_argument(std::make_unique<FlagArgument>(
+    add_cmd->add_argument(std::make_unique<Argument>(
         "verbose",           // dest_name
+        0,                   // nargs (is a flag)
         "Be verbose",        // help_text
+        false,               // required
         "false",             // default_value
         "v",                 // short_opt
         "verbose"            // long_opt
