@@ -173,3 +173,6 @@ public:
 
     void print_help();
 };
+
+// Function declaration for setting up the parser with all commands
+void setup_parser(Parser& parser);
