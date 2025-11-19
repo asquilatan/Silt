@@ -6,8 +6,11 @@
 #include <iostream>
 #include <filesystem>
 
+
+void test();
+
 int main(int argc, char* argv[]) {
-    
+
     // test the stupid repo classes (1-5 works, repo_create hasn't been impl. yet)
     test();
 
@@ -71,18 +74,26 @@ void test() {
 
         // Test repo_create function
         std::cout << "\nTest 6: Testing repo_create function..." << std::endl;
-        // Note: The repo_create function is currently a stub, so we'll just call it
         Repository new_repo = repo_create(std::filesystem::temp_directory_path() / "test_repo");
         std::cout << "  PASS: repo_create function called (implementation is a stub)" << std::endl;
 
-        // Test Repository constructor with force=false on a directory without .git (should fail)
+        // Test Repository constructor with force=false on a directory without .git (should do a runtime err)
         std::cout << "\nTest 7: Testing Repository constructor with force=false on non-git directory..." << std::endl;
-        try {
-            Repository invalid_repo(std::filesystem::current_path(), false);
-            std::cout << "  FAIL: Expected exception was not thrown" << std::endl;
-        } catch (const std::runtime_error& e) {
-            std::cout << "  Expected exception caught: " << e.what() << std::endl;
-            std::cout << "  PASS: Repository constructor correctly throws for non-git directory" << std::endl;
+        {
+            // Create a temporary directory for testing with NO .git dir
+            std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "silt_test_temp";
+            std::filesystem::create_directories(temp_dir);
+            try {
+                Repository invalid_repo(temp_dir, false);
+                std::cout << "  FAIL: Expected exception was not thrown" << std::endl;
+            } catch (const std::runtime_error& e) {
+                std::cout << "  Expected exception caught: " << e.what() << std::endl;
+                std::cout << "  PASS: Repository constructor correctly throws for non-git directory" << std::endl;
+            }
+            // Clean up the temp directory
+            if (std::filesystem::exists(temp_dir)) {
+                std::filesystem::remove_all(temp_dir);
+            }
         }
 
         std::cout << "\nAll Repository class tests completed successfully!" << std::endl;

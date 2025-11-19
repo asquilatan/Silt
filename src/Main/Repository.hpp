@@ -24,5 +24,6 @@ std::filesystem::path repo_path(const Repository& repo, const char* first, ...);
 std::filesystem::path repo_file(const Repository& repo, const char* first, ...);
 std::filesystem::path repo_dir(const Repository& repo, bool create, const char* first, ...);
 Repository repo_create(const std::filesystem::path& path);
+std::string repo_default_config();
 
 #endif // REPOSITORY_HPP

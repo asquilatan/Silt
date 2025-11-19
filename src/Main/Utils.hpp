@@ -106,6 +106,25 @@ public:
         std::transform(lowerSection.begin(), lowerSection.end(), lowerSection.begin(), ::tolower);
         sections[lowerSection][key] = value;
     }
+
+    // Convert the config to a string
+    std::string toString() const {
+        std::stringstream ss;
+        for (const auto& section_pair : sections) {
+            // Don't write the DEFAULT section if it's empty or was just a placeholder
+            if (section_pair.first == "DEFAULT" && section_pair.second.empty()) {
+                continue;
+            }
+            // Create the section
+            ss << "[" << section_pair.first << "]\n";
+            // For every key val pair in the section
+            for (const auto& key_value_pair : section_pair.second) {
+                // Have this be a part of the string
+                ss << "\t" << key_value_pair.first << " = " << key_value_pair.second << "\n";
+            }
+        }
+        return ss.str();
+    }
 };
 
 #endif // UTILS_HPP

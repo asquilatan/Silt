@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <cstdarg>
+#include <fstream>
 #include "Repository.hpp"
 #include "Utils.hpp"
 
@@ -132,7 +133,73 @@ std::filesystem::path repo_dir(const Repository& repo, bool create, const char* 
 }
 
 
-// Creates a new repository at the given path.
+// Creates a new repository at the given path. this should only called once, by cmd_init
 Repository repo_create(const std::filesystem::path& path) {
-    // TODO: whatoauhdsaoudhjlvnxjfnsdeaouiraeorea someone end me
+    Repository repo(path, true);
+
+    // If the work tree exists
+    if (std::filesystem::exists(repo.worktree)) {
+        // and if the work tree is NOT a directory
+        if (!std::filesystem::is_directory(repo.worktree)) {
+            throw std::runtime_error("Not a directory " + repo.worktree.string());
+        }
+        // if there is already a git directory
+        if (std::filesystem::exists(repo.gitdir) && std::filesystem::is_directory(repo.gitdir)) {
+            throw std::runtime_error(repo.gitdir.string() + " is not empty.");
+        }
+    // Otherwise, create dir
+    } else {
+        std::filesystem::create_directories(repo.worktree);
+    }
+
+    // Create the git directory
+    repo_dir(repo, true, "branches", nullptr);
+    repo_dir(repo, true, "objects", nullptr);
+    repo_dir(repo, true, "refs", "heads", nullptr);
+    repo_dir(repo, true, "refs", "tags", nullptr);
+    
+    // Create the config file
+    std::filesystem::path description_path = repo_file(repo, "description", nullptr);
+    // If description_file was created, write the description
+    std::ofstream description_file(description_path);
+    if (description_file.is_open()) {
+        description_file << "Unnamed repository; edit this file 'description' to name the repository.\n";
+        description_file.close();
+        // Otherwise, throw an error
+    } else {
+        throw std::runtime_error("Failed to create description file: " + description_path.string());
+    }
+
+    // Create the HEAD file
+    std::filesystem::path head_path = repo_file(repo, "HEAD", nullptr);
+    // If the HEAD was created, write the reference to the current head
+    std::ofstream head_file(head_path);
+    if (head_file.is_open()) {
+        head_file << "ref: refs/heads/master\n";
+        head_file.close();
+    } else {
+        throw std::runtime_error("Failed to create HEAD file: " + head_path.string());
+    }
+
+    // Create the config file
+    std::filesystem::path config_path = repo_file(repo, "config", nullptr);
+    std::ofstream config_file(config_path);
+    if (config_file.is_open()) {
+        config_file << repo_default_config();
+        config_file.close();
+    } else {
+        throw std::runtime_error("Failed to create config file: " + config_path.string());
+    }
+
+    return repo;
+}
+
+// Default config, use config parser
+std::string repo_default_config() {
+    ConfigParser config;
+    config.set("core", "repositoryformatversion", "0");
+    config.set("core", "filemode", "false");
+    config.set("core", "bare", "false");
+
+    return config.toString();
 }
