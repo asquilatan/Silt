@@ -301,6 +301,17 @@ void setup_parser(Parser& parser) {
         "verbose"            // long_opt
     ));
 
+    // Add argument to init command for directory path
+    init_cmd->add_argument(std::make_unique<Argument> (
+        "directory",
+        1,
+        "Directory to initialize the repository in",
+        false,
+        "."
+    ));
+
+    parser.add_command(std::move(init_cmd));
+
     // Register the command with the parser
     parser.add_command(std::move(add_cmd));
 }

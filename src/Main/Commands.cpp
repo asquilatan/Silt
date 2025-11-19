@@ -3,6 +3,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include "Repository.hpp" // Include the header for Repository
+#include <filesystem>
 
 // Implementation of cmd_add to handle multiple paths from positional_args
 void cmd_add(const ParsedArgs& args, Repository* repo) {
@@ -31,7 +33,7 @@ void cmd_add(const ParsedArgs& args, Repository* repo) {
     if (args.exists("verbose") && args.get("verbose") == "true") {
         std::cout << "Verbose mode enabled." << std::endl;
     }
-    
+
 }
 
 // Implementation of cmd_check_ignore to handle multiple paths
@@ -81,7 +83,27 @@ void cmd_hash_object(const ParsedArgs& args, Repository* repo) {
 }
 
 void cmd_init(const ParsedArgs& args, Repository* repo) {
-    std::cout << "init command not yet implemented" << std::endl;
+    std::filesystem::path init_path;
+
+    // Check for directory argument (could be passed as --directory mydir)
+    std::string directory_arg = args.get("directory");
+
+    // Use the first positional argument as the path if provided,
+    // otherwise use the directory argument, or default to current directory
+    if (!args.positional_args.empty()) {
+        init_path = args.positional_args[0];
+    } else if (!directory_arg.empty() && directory_arg != ".") {
+        init_path = directory_arg;
+    } else {
+        init_path = "."; // Default to current directory if no path provided
+    }
+
+    try {
+        Repository new_repo = repo_create(init_path); // Call repo_create which returns a Repository object
+        std::cout << "Initialized empty Silt repository in " << new_repo.gitdir << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error initializing repository: " << e.what() << std::endl;
+    }
 }
 
 void cmd_log(const ParsedArgs& args, Repository* repo) {

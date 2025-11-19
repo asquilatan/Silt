@@ -11,9 +11,6 @@ void test();
 
 int main(int argc, char* argv[]) {
 
-    // test the stupid repo classes (1-5 works, repo_create hasn't been impl. yet)
-    test();
-
     // Create parser with program description
     Parser parser("Silt - Version Control System");
 
