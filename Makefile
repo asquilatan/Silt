@@ -16,7 +16,7 @@ CXXFLAGS += -Isrc/External
 CXXFLAGS += -Isrc/External/openssl
 
 # Define the name of the final executable
-TARGET = silt
+TARGET = bin/silt.exe
 
 # Define the source files to compile
 # List all .cpp files here
@@ -47,12 +47,16 @@ all: $(TARGET)
 # $(SOURCES): The list of source files to compile and link
 # $(LDFLAGS): Linker flags (library search path)
 # $(LIBS): The libraries to link
-$(TARGET): $(SOURCES)
+$(TARGET): $(SOURCES) | bin
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SOURCES) $(LDFLAGS) $(LIBS)
+
+# Create bin directory if it doesn't exist
+bin:
+	mkdir -p bin
 
 # Optional: Rule to clean up built files
 clean:
-	rm -f $(TARGET)  # Removes the executable
+	if exist $(TARGET) del /Q $(TARGET)  # Removes the executable
 
 # Optional: Rule to mark 'clean' as phony (not a file)
 .PHONY: all clean
