@@ -4,6 +4,7 @@
 #include <string>
 #include <filesystem>
 #include <cstdarg>
+#include <optional>
 
 // Forward declaration
 class ConfigParser;
@@ -24,6 +25,7 @@ std::filesystem::path repo_path(const Repository& repo, const char* first, ...);
 std::filesystem::path repo_file(const Repository& repo, const char* first, ...);
 std::filesystem::path repo_dir(const Repository& repo, bool create, const char* first, ...);
 Repository repo_create(const std::filesystem::path& path);
+std::optional<Repository> repo_find(std::filesystem::path path = ".", bool required = true);
 std::string repo_default_config();
 
 #endif // REPOSITORY_HPP

@@ -157,7 +157,7 @@ Repository repo_create(const std::filesystem::path& path) {
     repo_dir(repo, true, "objects", nullptr);
     repo_dir(repo, true, "refs", "heads", nullptr);
     repo_dir(repo, true, "refs", "tags", nullptr);
-    
+
     // Create the config file
     std::filesystem::path description_path = repo_file(repo, "description", nullptr);
     // If description_file was created, write the description
@@ -202,4 +202,32 @@ std::string repo_default_config() {
     config.set("core", "bare", "false");
 
     return config.toString();
+}
+
+std::optional<Repository> repo_find(std::filesystem::path path, bool required) {
+    // takes real path of a given path
+    path = std::filesystem::canonical(path);
+
+    // if the directory is a git repository
+    std::filesystem::path git_path = path / ".git";
+    if (std::filesystem::is_directory(git_path)) {
+        return Repository(path, false);
+    }
+
+    // if it isn't a git repo, recurse to parent; assign parent path to parent
+    std::filesystem::path parent = path.parent_path();
+
+    // if parent is path
+    if (parent == path) {
+        // if required
+        if (required) {
+            // raise exception
+            throw std::runtime_error("No Git repository found");
+        }
+        // otherwise, return none
+        return std::nullopt;
+    }
+
+    // recurse, pass parent
+    return repo_find(parent, required);
 }
