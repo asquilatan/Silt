@@ -7,6 +7,7 @@ class Repository;
 
 void cmd_add(const ParsedArgs& args, Repository* repo);
 void cmd_cat_file(const ParsedArgs& args, Repository* repo);
+void cat_file(Repository* repo, std::string object, std::string fmt);
 void cmd_check_ignore(const ParsedArgs& args, Repository* repo);
 void cmd_checkout(const ParsedArgs& args, Repository* repo);
 void cmd_commit(const ParsedArgs& args, Repository* repo);

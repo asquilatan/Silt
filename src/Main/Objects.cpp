@@ -8,6 +8,9 @@
 #include <fstream>
 #include <memory>
 #include <vector>
+#include <sstream>
+#include <iomanip>
+#include <openssl/sha.h>
 
 class GitObject {
 public:
@@ -30,14 +33,24 @@ public:
         throw std::runtime_error("Deserialize method not implemented for base GitObject.");
     }
 
+    virtual std::string get_fmt() const {
+        throw std::runtime_error("Get_fmt method not implemented for base GitObject.");
+    }
+
     virtual void initialize(const std::string& data) {
-        
+
     }
 };
 
 class GitBlob : public GitObject {
 public:
-    using GitObject::GitObject; // Inherit constructors
+    // Constructor for creating a new object with data
+    GitBlob(const std::string& data) {
+        blobdata = data;
+    }
+
+    // Default constructor
+    GitBlob() = default;
 
     // overrides serialize, returns blob data
     std::string serialize() override {
@@ -48,18 +61,48 @@ public:
     void deserialize(const std::string& data) override {
         blobdata = data;
     }
+
+    // return format type
+    std::string get_fmt() const override {
+        return "blob";
+    }
 private:
     std::string blobdata;
 };
 
 // Define other GitObject subclasses
-class GitCommit : public GitObject { 
+class GitCommit : public GitObject {
 public:
-    using GitObject::GitObject; 
+    using GitObject::GitObject;
     // TODO: Implement commit-specific serialize/deserialize
+
+    // return format type
+    std::string get_fmt() const override {
+        return "commit";
+    }
 };
-class GitTree : public GitObject { using GitObject::GitObject; };
-class GitTag : public GitObject { using GitObject::GitObject; };
+
+class GitTree : public GitObject {
+public:
+    using GitObject::GitObject;
+
+    // return format type
+    std::string get_fmt() const override {
+        return "tree";
+    }
+};
+
+class GitTag : public GitObject {
+public:
+    using GitObject::GitObject;
+
+    // return format type
+    std::string get_fmt() const override {
+        return "tag";
+    }
+};
+
+std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo = nullptr);
 
 std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sha) {
     // first 2 digits of sha
@@ -78,7 +121,7 @@ std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sh
     if (!std::filesystem::is_regular_file(path)) {
         return std::nullopt;
     }
-    
+
     // delete these because they're not needed anymore
     delete[] dirname;
     delete[] filename;
@@ -194,4 +237,104 @@ std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sh
     } else {
         throw std::runtime_error("Unknown type for object " + std::string(sha));
     }
+}
+
+std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo) {
+    // Serialize object data
+    std::string data = obj->serialize();
+    // Add header (format + space + size + null terminator + data)
+    std::string result = obj->get_fmt() + " " + std::to_string(data.length()) + '\0' + data;
+
+    // Compute SHA1 hash
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1(reinterpret_cast<const unsigned char*>(result.c_str()), result.length(), hash);
+
+    // Convert hash to hex string
+    std::stringstream sha_stream;
+    sha_stream << std::hex << std::setfill('0');
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        sha_stream << std::setw(2) << static_cast<unsigned>(hash[i]);
+    }
+    std::string sha = sha_stream.str();
+
+    if (repo) {
+        // Compute path
+        char* sha_ptr = const_cast<char*>(sha.c_str());
+        char* dirname = new char[3];
+        strncpy(dirname, sha_ptr, 2);
+        dirname[2] = '\0';
+
+        char* filename = new char[sha.length() - 1];
+        strncpy(filename, sha_ptr + 2, sha.length() - 2);
+        filename[sha.length() - 2] = '\0';
+
+        std::filesystem::path path = repo_file(*repo, "objects", dirname, filename);
+
+        // Create parent directories if they don't exist
+        std::filesystem::create_directories(path.parent_path());
+
+        // Check if the file doesn't already exist
+        if (!std::filesystem::exists(path)) {
+            // Compress the result
+            z_stream zs;
+            memset(&zs, 0, sizeof(zs));
+
+            if (deflateInit(&zs, Z_DEFAULT_COMPRESSION) != Z_OK) {
+                throw std::runtime_error("Failed to initialize zlib compression.");
+            }
+
+            zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(result.c_str()));
+            zs.avail_in = result.length();
+
+            int ret;
+            std::string compressed_data;
+            char outbuffer[32768];
+
+            do {
+                zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
+                zs.avail_out = sizeof(outbuffer);
+
+                ret = deflate(&zs, Z_SYNC_FLUSH);
+
+                if (compressed_data.size() < zs.total_out) {
+                    compressed_data.append(outbuffer, zs.total_out - compressed_data.size());
+                }
+            } while (ret == Z_OK);
+
+            deflateEnd(&zs);
+
+            // Write the compressed data to the file
+            std::ofstream file(path, std::ios::binary);
+            file.write(compressed_data.c_str(), compressed_data.length());
+            file.close();
+        }
+
+        // Clean up allocated memory
+        delete[] dirname;
+        delete[] filename;
+    }
+
+    return sha;
+}
+
+std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow=true) {
+    return name;
+}
+
+std::string object_hash(const std::string& data, const std::string& fmt, Repository* repo = nullptr) {
+    std::unique_ptr<GitObject> obj;
+
+    if (fmt == "commit") {
+        obj = std::make_unique<GitCommit>(data);
+    } else if (fmt == "tree") {
+        obj = std::make_unique<GitTree>(data);
+    } else if (fmt == "tag") {
+        obj = std::make_unique<GitTag>(data);
+    } else if (fmt == "blob") {
+        obj = std::make_unique<GitBlob>(data);
+    } else {
+        throw std::runtime_error("Unknown type: " + fmt);
+    }
+
+    return object_write(std::move(obj), repo);
 }

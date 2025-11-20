@@ -2,7 +2,8 @@
 #include "CLI.hpp"
 #include <iostream>
 #include <vector>
-#include <string>
+#include <string> // Include the header for GitObject and related functions
+#include "Objects.hpp"
 #include "Repository.hpp" // Include the header for Repository
 #include <filesystem>
 
@@ -67,7 +68,35 @@ void cmd_rm(const ParsedArgs& args, Repository* repo) {
 
 // Placeholders for other commands until they're implemented
 void cmd_cat_file(const ParsedArgs& args, Repository* repo) {
-    std::cout << "cat-file command not yet implemented" << std::endl;
+    // find repo with repo_find()
+    // call cat_file, passing repo, object in args, and fmt=args.type but encoded
+    std::string type = args.get("type");
+    std::string object = args.get("object");
+
+    // If the repository is not found, attempt to find it from the current directory
+    if (!repo) {
+        std::optional<Repository> found_repo = repo_find(std::filesystem::current_path(), true);
+        if (found_repo.has_value()) {
+            repo = &found_repo.value();
+        } else {
+            std::cerr << "Error: Not a Git repository." << std::endl;
+            return;
+        }
+    }
+
+    cat_file(repo, object, type);
+}
+
+void cat_file(Repository* repo, std::string object, std::string fmt) {
+    // object_read, pass in repo and the return of object_find(repo, obj, fmt=fmt)
+    std::optional<std::unique_ptr<GitObject>> obj_opt = object_read(repo, const_cast<char*>(object_find(repo, object, fmt, true).c_str())); // object_find is defined in Objects.cpp
+    // if object has a value
+    if (obj_opt.has_value()) {
+        std::unique_ptr<GitObject> obj = std::move(obj_opt.value());
+        std::cout << obj->serialize();
+    } else {
+        std::cerr << "Error: Object " << object << " not found." << std::endl;
+    }
 }
 
 void cmd_checkout(const ParsedArgs& args, Repository* repo) {
@@ -79,7 +108,37 @@ void cmd_commit(const ParsedArgs& args, Repository* repo) {
 }
 
 void cmd_hash_object(const ParsedArgs& args, Repository* repo) {
-    std::cout << "hash-object command not yet implemented" << std::endl;
+    // Get the file path from arguments
+    std::string path = args.get("path");
+
+    // Get the type, defaulting to "blob" if not provided
+    std::string type = args.get("type", "blob");
+
+    // Check if we should write to the repository
+    bool write = args.exists("write");
+
+    if (path.empty()) {
+        std::cerr << "Error: Path argument is required." << std::endl;
+        return;
+    }
+
+    // Read the file content as binary
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file " << path << std::endl;
+        return;
+    }
+
+    // Read the entire file content into a string
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    file.close();
+
+    // Call object_hash to compute the SHA1 hash
+    std::string sha = object_hash(content, type, write ? repo : nullptr);
+
+    // Print the SHA
+    std::cout << sha << std::endl;
 }
 
 void cmd_init(const ParsedArgs& args, Repository* repo) {

@@ -31,6 +31,35 @@ std::optional<std::string> Argument::parse_from_argv(int& current_argc, char**& 
             return "Error: Missing value for argument " + dest_name;
         }
 
+        // Validate against choices if choices are defined
+
+        // if there are choices
+        if (!choices.empty()) {
+            bool valid_choice = false;
+            // for every choice in choice
+            for (const auto& choice : choices) {
+                // if the next argument given is within the choice
+                if (next_arg == choice) {
+                    valid_choice = true;
+                    break;
+                }
+            }
+
+            // if not a valid choice
+            if (!valid_choice) {
+                // create a string of valid choices
+                std::string valid_choices = "";
+                for (size_t i = 0; i < choices.size(); ++i) {
+                    // append choices to valid choices
+                    if (i > 0) valid_choices += ", ";
+                    valid_choices += choices[i];
+                }
+                // return an error string containing valid choices
+                return "Error: Invalid value '" + next_arg + "' for argument " + dest_name +
+                       ". Valid choices are: " + valid_choices;
+            }
+        }
+
         storage.values[dest_name] = next_arg;
 
         // Consume the value
@@ -46,6 +75,35 @@ std::optional<std::string> Argument::parse_from_argv(int& current_argc, char**& 
             std::string curr_arg = current_argv[0];
             if (curr_arg.rfind("-", 0) == 0) {
                 break; // Stop at the next option
+            }
+            // Validate against choices if choices are defined
+
+            // if there are choices
+            if (!choices.empty()) {
+                bool valid_choice = false;
+                // for every choice in choices
+                for (const auto& choice : choices) {
+                    // if the argument is a valid choice
+                    if (curr_arg == choice) {
+                        valid_choice = true;
+                        break;
+                    }
+                }
+
+                // if it's not a valid choice
+                if (!valid_choice) {
+                    // create a string of valid choices
+                    std::string valid_choices = "";
+                    // for every choice
+                    for (size_t i = 0; i < choices.size(); ++i) {
+                        // append choice to valid_choices
+                        if (i > 0) valid_choices += ", ";
+                        valid_choices += choices[i];
+                    }
+                    // return error string with valid choices
+                    return "Error: Invalid value '" + curr_arg + "' for argument " + dest_name +
+                           ". Valid choices are: " + valid_choices;
+                }
             }
             collected_values.push_back(curr_arg);
             current_argc--;
@@ -108,16 +166,78 @@ std::optional<std::string> parse_arguments(int argc, char* argv[], const std::ve
         }
     }
 
-    // Check for required arguments
+    // Handle positional arguments for arguments that have choices and regular positional arguments
+    // If an argument has choices and is required, check if we can assign positional arguments to it
+    std::vector<std::string> remaining_positional_args = parsed_args.positional_args;
+    parsed_args.positional_args.clear(); // Clear temporarily to reassign
+
+    // First, handle arguments that have choices (they get priority)
     for (auto& argument : arguments) {
-        if (argument->required && parsed_args.values.find(argument->dest_name) == parsed_args.values.end()) {
+        // If this argument has choices and is required but not yet set
+        if (!argument->choices.empty() && argument->required &&
+            parsed_args.values.find(argument->dest_name) == parsed_args.values.end()) {
+
+            // If we have any remaining positional args to assign
+            if (!remaining_positional_args.empty()) {
+                std::string pos_arg = remaining_positional_args[0];
+
+                // Validate against choices
+                bool valid_choice = false;
+                for (const auto& choice : argument->choices) {
+                    if (pos_arg == choice) {
+                        valid_choice = true;
+                        break;
+                    }
+                }
+
+                if (!valid_choice) {
+                    std::string valid_choices = "";
+                    for (size_t i = 0; i < argument->choices.size(); ++i) {
+                        if (i > 0) valid_choices += ", ";
+                        valid_choices += argument->choices[i];
+                    }
+                    return "Error: Invalid value '" + pos_arg + "' for argument " + argument->dest_name + ". Valid choices are: " + valid_choices;
+                }
+
+                // Store the positional argument value to the argument name
+                parsed_args.values[argument->dest_name] = pos_arg;
+                remaining_positional_args.erase(remaining_positional_args.begin()); // Remove from remaining
+            }
+        }
+    }
+
+    // Then, handle remaining required arguments (without choices) in the order they appear
+    for (auto& argument : arguments) {
+        // If this argument is required, doesn't have choices and is not yet set
+        if (argument->required && argument->choices.empty() &&
+            parsed_args.values.find(argument->dest_name) == parsed_args.values.end()) {
+
+            // If we have any remaining positional args to assign
+            if (!remaining_positional_args.empty()) {
+                std::string pos_arg = remaining_positional_args[0];
+
+                // Store the positional argument value to the argument name
+                parsed_args.values[argument->dest_name] = pos_arg;
+                remaining_positional_args.erase(remaining_positional_args.begin()); // Remove from remaining
+            }
+        }
+    }
+
+    // Add any remaining positional args back to the positional_args vector
+    for (const auto& pos_arg : remaining_positional_args) {
+        parsed_args.positional_args.push_back(pos_arg);
+    }
+
+    // Check for required arguments that were not provided via flags or validated positional args
+    for (auto& argument : arguments) {
+        if (argument->required && parsed_args.values.find(argument->dest_name) == parsed_args.values.end() && parsed_args.multiple_values.find(argument->dest_name) == parsed_args.multiple_values.end()) {
             return "Error: Missing required argument: " + argument->dest_name;
         }
     }
 
     // Add default values for optional arguments not provided
     for (auto& argument : arguments) {
-        if (!argument->required && parsed_args.values.find(argument->dest_name) == parsed_args.values.end()) {
+        if (!argument->required && parsed_args.values.find(argument->dest_name) == parsed_args.values.end() && parsed_args.multiple_values.find(argument->dest_name) == parsed_args.multiple_values.end()) {
             parsed_args.values[argument->dest_name] = argument->default_value;
         }
     }
@@ -196,7 +316,7 @@ void setup_parser(Parser& parser) {
 
     // Create the "cat-file" command
     auto cat_file_cmd = std::make_unique<Command>(
-        "cat_file",
+        "cat-file",
         "Provide content of repository objects",
         cmd_cat_file
     );
@@ -310,8 +430,72 @@ void setup_parser(Parser& parser) {
         "."
     ));
 
-    parser.add_command(std::move(init_cmd));
+    // Define choices for cat-file type argument
+    std::vector<std::string> type_choices = {"blob", "commit", "tag", "tree"};
+
+    cat_file_cmd->add_argument(std::make_unique<Argument> (
+        "type",
+        1,
+        "Specify the type [blob|commit|tag|tree]",
+        true,
+        type_choices,
+        "",      // default_value
+        "",      // short_opt
+        "",      // long_opt
+        true     // positional
+    ));
+
+    cat_file_cmd->add_argument(std::make_unique<Argument> (
+        "object",
+        1,
+        "The object to display",
+        true,
+        "",      // default_value
+        "",      // short_opt1
+        "",      // long_opt
+        true     // positional
+    ));
+
+    hash_object_cmd->add_argument(std::make_unique<Argument> (
+        "type",
+        1,
+        "Specify the type",
+        false,
+        type_choices,
+        "blob",
+        "t",
+        "type",
+        false
+    ));
+
+    hash_object_cmd->add_argument(std::make_unique<Argument> (
+        "write",
+        0,
+        "Actually write object into database",
+        false,
+        "",
+        "w",
+        "write",
+        false
+    ));
+
+    hash_object_cmd->add_argument(std::make_unique<Argument> (
+        "path",
+        1,
+        "Read object from <file>",
+        true,    // required
+        "",      // default_value - empty
+        "",      // short_opt
+        "",      // long_opt
+        true     // positional
+    ));
+
+
 
     // Register the command with the parser
+    parser.add_command(std::move(init_cmd));
     parser.add_command(std::move(add_cmd));
+    parser.add_command(std::move(cat_file_cmd));
+    parser.add_command(std::move(hash_object_cmd));
+
 }

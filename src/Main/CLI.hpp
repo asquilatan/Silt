@@ -63,10 +63,15 @@ public:
     std::string help_text;
     bool required;
     int nargs; // 0 for flags, 1 for single value, -1 for multiple values
+    // vector of choices, can be of whatever type
+    std::vector<std::string> choices;
     std::string default_value;
 
     std::string short_opt;
     std::string long_opt;
+
+    // Add a field to indicate if this argument can be positional
+    bool positional;
 
     // constructor
     Argument(
@@ -76,9 +81,25 @@ public:
         bool req,
         const std::string& def_val = "",
         const std::string& short_o = "",
-        const std::string& long_o = ""
+        const std::string& long_o = "",
+        bool is_positional = false
     ) : dest_name(dest), help_text(help), required(req), nargs(num_args),
-    default_value(def_val), short_opt(short_o), long_opt(long_o) {};
+    default_value(def_val), short_opt(short_o), long_opt(long_o), positional(is_positional) {};
+
+    // constructor with choices
+    Argument(
+        const std::string& dest,
+        int num_args,
+        const std::string& help,
+        bool req,
+        const std::vector<std::string>& choices_list,
+        const std::string& def_val = "",
+        const std::string& short_o = "",
+        const std::string& long_o = "",
+        bool is_positional = false
+    ) : dest_name(dest), help_text(help), required(req), nargs(num_args),
+    choices(choices_list), default_value(def_val), short_opt(short_o), long_opt(long_o), positional(is_positional) {};
+
 
     // Virtual destructor for the argument base class
     virtual ~Argument() = default;
