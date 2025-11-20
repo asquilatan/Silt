@@ -1,0 +1,197 @@
+#include <stdexcept>
+#include <cstddef>
+#include <stdexcept>
+#include <optional>
+#include "Repository.hpp"
+#include <cstring>
+#include <zlib.h>
+#include <fstream>
+#include <memory>
+#include <vector>
+
+class GitObject {
+public:
+    // Constructor for creating a new object
+    GitObject() = default;
+
+    // Constructor for deserializing from existing data
+    GitObject(const std::string& data) {
+        deserialize(data);
+    }
+
+    // Virtual destructor for proper cleanup of derived classes
+    virtual ~GitObject() = default;
+
+    virtual std::string serialize() {
+        throw std::runtime_error("Serialize method not implemented for base GitObject.");
+    }
+
+    virtual void deserialize(const std::string& data) {
+        throw std::runtime_error("Deserialize method not implemented for base GitObject.");
+    }
+
+    virtual void initialize(const std::string& data) {
+        
+    }
+};
+
+class GitBlob : public GitObject {
+public:
+    using GitObject::GitObject; // Inherit constructors
+
+    // overrides serialize, returns blob data
+    std::string serialize() override {
+        return blobdata;
+    }
+
+    // overrides deserialize, stores data as blobdata
+    void deserialize(const std::string& data) override {
+        blobdata = data;
+    }
+private:
+    std::string blobdata;
+};
+
+// Define other GitObject subclasses
+class GitCommit : public GitObject { 
+public:
+    using GitObject::GitObject; 
+    // TODO: Implement commit-specific serialize/deserialize
+};
+class GitTree : public GitObject { using GitObject::GitObject; };
+class GitTag : public GitObject { using GitObject::GitObject; };
+
+std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sha) {
+    // first 2 digits of sha
+    char* dirname = new char[3];
+    strncpy(dirname, sha, 2);
+    dirname[2] = '\0';
+
+    // next few digits of sha
+    char* filename = new char[strlen(sha) - 1];
+    strncpy(filename, sha + 2, strlen(sha) - 2);
+    filename[strlen(sha) - 2] = '\0';
+
+    std::filesystem::path path = repo_file(*repo, "objects", dirname, filename);
+
+    // if path is not a file
+    if (!std::filesystem::is_regular_file(path)) {
+        return std::nullopt;
+    }
+    
+    // delete these because they're not needed anymore
+    delete[] dirname;
+    delete[] filename;
+
+    // read file from path as binary
+    std::ifstream file(path, std::ios::binary);
+
+    // store the data in a vector
+    std::vector<char> compressed_data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+    // close the file
+    file.close();
+
+    // creates a var of type z_stream
+    z_stream zs;
+
+    // initializes the bytes of zs to 0
+    memset(&zs, 0, sizeof(zs));
+
+    // basically, Z_OK is an integer, it's returned when zs is properly inflated via inflateInit
+    // if it isn't Z_OK, then something went wrong, so throw a runtime err
+    if (inflateInit(&zs) != Z_OK) {
+        throw std::runtime_error("Failed to initialize zlib inflation.");
+    }
+
+    // tell z_stream where the inp data is, .data() just points to the first element of the vector
+    zs.next_in = (Bytef*)compressed_data.data();
+
+    // size of the vector
+    zs.avail_in = compressed_data.size();
+
+    // ret is the status of inflation
+    // outbuffer is basically a buffer for the output of the inflation
+    // decompressed_data contains the final decompressed data
+    int ret;
+    char outbuffer[32768];
+    std::string decompressed_data;
+
+    do {
+        // next_out points to where inflate should write the chunk of decompressed data
+        // reinterpret_cast converts outbuffer from char* to bytef*
+        zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
+
+        // available output space
+        zs.avail_out = sizeof(outbuffer);
+
+        // inflate zs, assign ret to the return code of inflate (Z_OK is good, anything else is bad)
+        ret = inflate(&zs, Z_NO_FLUSH);
+
+        // if the decompressed data size is less than the output (if inflate wrote any new decompressed bytes)
+        // append the remaining chunks to decompressed_data
+        if (decompressed_data.size() < zs.total_out) {
+            decompressed_data.append(outbuffer, zs.total_out - decompressed_data.size());
+        }
+
+    } while (ret == Z_OK);
+
+    // end the inflation
+    inflateEnd(&zs);
+
+    // if the return value is not Z_STREAM_END, throw runtime err
+    if (ret != Z_STREAM_END) {
+        throw std::runtime_error("Zlib inflation failed: " + std::string(zs.msg));
+    }
+
+    // find a space
+    auto space_pos = decompressed_data.find(' ');
+    // if the space position does not exist, throw runtime err
+    if (space_pos == std::string::npos) {
+        throw std::runtime_error("Invalid object format: missing space.");
+    }
+
+    // find a null terminator
+    auto null_pos = decompressed_data.find('\0', space_pos);
+    // if it doesn't exist, throw runtime err
+    if (null_pos == std::string::npos) {
+        throw std::runtime_error("Invalid object format: missing null terminator.");
+    }
+
+    // take the format, starting from 0 to space position (exclusive)
+    // `commit 1028/0tree` would give `commit`
+    std::string fmt = decompressed_data.substr(0, space_pos);
+
+    // take the size of the object (numbers before the null terminator)
+    // `commit 1028/0tree` would give `1028`
+    size_t size = std::stoul(decompressed_data.substr(space_pos + 1, null_pos - (space_pos + 1)));
+
+    // take the content of the object (everything after the null terminator)
+    std::string content = decompressed_data.substr(null_pos + 1);
+
+    // if the content length and size is not the same, throw runtime err
+    if (size != content.length()) {
+        throw std::runtime_error("Malformed object: size mismatch.");
+    }
+
+    // pick constructor based on object type (fmt)
+    if (fmt == "commit") {
+        // convert unique_ptr<GitCommit> to unique_ptr<GitObject>
+        std::unique_ptr<GitObject> obj = std::make_unique<GitCommit>(content);
+        return obj;
+    } else if (fmt == "tree") {
+        // convert unique_ptr<GitTree> to unique_ptr<GitObject>
+        std::unique_ptr<GitObject> obj = std::make_unique<GitTree>(content);
+        return obj;
+    } else if (fmt == "tag") {
+        // convert unique_ptr<GitTag> to unique_ptr<GitObject>
+        std::unique_ptr<GitObject> obj = std::make_unique<GitTag>(content);
+        return obj;
+    } else if (fmt == "blob") {
+        // convert unique_ptr<GitBlob> to unique_ptr<GitObject>
+        std::unique_ptr<GitObject> obj = std::make_unique<GitBlob>(content);
+        return obj;
+    } else {
+        throw std::runtime_error("Unknown type for object " + std::string(sha));
+    }
+}
