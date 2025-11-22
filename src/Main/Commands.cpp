@@ -6,6 +6,7 @@
 #include "Objects.hpp"
 #include "Repository.hpp" // Include the header for Repository
 #include <filesystem>
+#include <set>
 
 // Implementation of cmd_add to handle multiple paths from positional_args
 void cmd_add(const ParsedArgs& args, Repository* repo) {
@@ -166,7 +167,112 @@ void cmd_init(const ParsedArgs& args, Repository* repo) {
 }
 
 void cmd_log(const ParsedArgs& args, Repository* repo) {
-    std::cout << "log command not yet implemented" << std::endl;
+    std::cout << "digraph siltlog{" << std::endl;
+    std::cout << "  node[shape=rect]" << std::endl;
+    std::set<std::string> seen;
+    log_graphviz(repo, object_find(repo, args.get("commit"), "", true), seen);
+    std::cout << "}" << std::endl;
+}
+
+std::string log_graphviz(Repository* repo, std::string sha, std::set<std::string> seen) {
+    // if sha was already seen
+    if (seen.count(sha)) {
+        return sha; // return if already processed
+    }
+    // otherwise, add sha to seen
+    seen.insert(sha);
+
+    // commit = object_read(repo, sha)
+    char* sha_ptr = const_cast<char*>(sha.c_str());
+    std::optional<std::unique_ptr<GitObject>> obj_opt = object_read(repo, sha_ptr);
+
+    // if object does not have a value (nullopt)
+    if (!obj_opt.has_value()) {
+        std::cerr << "Error: Object " << sha << " not found." << std::endl;
+        return sha;
+    }
+
+    std::unique_ptr<GitObject> obj = std::move(obj_opt.value());
+
+    // check if the object format is commit
+    if (obj->get_fmt() != "commit") {
+        std::cerr << "Error: Object " << sha << " is not a commit." << std::endl;
+        return sha;
+    }
+
+    // Cast to GitCommit to access kvlm
+    GitCommit* commit = dynamic_cast<GitCommit*>(obj.get());
+    if (!commit) {
+        std::cerr << "Error: Could not cast object to commit." << std::endl;
+        return sha;
+    }
+
+    // Since kvlm is private, we need to use the serialize method and re-parse it
+    // or add a getter method. For now I'll use the serialize method and re-parse.
+    std::string serialized_data = commit->serialize();
+    KVLM kvlm = kvlm_parse(serialized_data);
+
+    // message = commit.kvlm[""].decode("utf8").strip()
+    std::string message;
+    auto it = kvlm.find("");
+    if (it != kvlm.end()) {
+        message = std::get<std::string>(it->second);
+    } else {
+        message = "No message";
+    }
+
+    // Replace \ with \\ to escape backslashes
+    size_t pos = 0;
+    while ((pos = message.find('\\', pos)) != std::string::npos) {
+        message.replace(pos, 1, "\\\\");
+        pos += 2; // Move past the new "\\""
+    }
+
+    // Replace quotes with escaped quotes
+    pos = 0;
+    while ((pos = message.find('"', pos)) != std::string::npos) {
+        message.replace(pos, 1, "\\\"");
+        pos += 2; // Move past the new \"
+    }
+
+    // If newline is in message, keep only the first line
+    size_t newline_pos = message.find('\n');
+    if (newline_pos != std::string::npos) {
+        message = message.substr(0, newline_pos);
+    }
+
+    // cout "   c_" << sha << "[label=\"" << sha[0:7] << ":" << message << "\"]" << endl;
+    std::string short_sha = sha.substr(0, 7);
+    std::cout << "   c_" << sha << "[label=\"" << short_sha << ":" << message << "\"]" << std::endl;
+
+    // if parent is not in kvlm keys (if it's the initial commit)
+    auto parent_it = kvlm.find("parent");
+    if (parent_it == kvlm.end()) {
+        return sha; // Initial commit with no parents
+    }
+
+    // parents = commit.kvlm["parent"]
+    std::vector<std::string> parents;
+    if (std::holds_alternative<std::string>(parent_it->second)) {
+        // if the type of parents is not list (no multi parents), normalize by putting in vector
+        parents.push_back(std::get<std::string>(parent_it->second));
+    } else {
+        // if it's already a vector
+        parents = std::get<std::vector<std::string>>(parent_it->second);
+    }
+
+    // for every parent in parents
+    for (const std::string& parent : parents) {
+        // p = decoded version of parent
+        std::string p = parent; // already a string in our implementation
+        // cout << "   c_" << sha << " -> c_" << p << ";" << endl;
+        std::cout << "   c_" << sha << " -> c_" << p << ";" << std::endl;
+
+        // log_graphviz(repo, p, seen)
+        log_graphviz(repo, p, seen);
+    }
+
+    return sha;
 }
 
 void cmd_ls_files(const ParsedArgs& args, Repository* repo) {

@@ -237,6 +237,57 @@ std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo) {
 }
 
 std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow) {
+    // If name is empty, return it as is
+    if (name.empty()) {
+        return name;
+    }
+
+    // If name is "HEAD", resolve it to the actual commit SHA
+    if (name == "HEAD") {
+        // Read the .git/HEAD file to get the reference
+        std::filesystem::path head_path = repo->gitdir / "HEAD";
+
+        if (std::filesystem::exists(head_path)) {
+            std::ifstream head_file(head_path);
+            std::string head_content((std::istreambuf_iterator<char>(head_file)),
+                                   std::istreambuf_iterator<char>());
+
+            // Remove any trailing newlines
+            if (!head_content.empty() && head_content.back() == '\n') {
+                head_content.pop_back();
+            }
+
+            // HEAD usually contains something like "ref: refs/heads/main"
+            if (head_content.substr(0, 5) == "ref: ") {
+                // Extract the reference part
+                std::string ref = head_content.substr(5); // "refs/heads/main"
+
+                // Read the reference file to get the commit SHA
+                std::filesystem::path ref_path = repo->gitdir / ref;
+
+                if (std::filesystem::exists(ref_path)) {
+                    std::ifstream ref_file(ref_path);
+                    std::string sha((std::istreambuf_iterator<char>(ref_file)),
+                                  std::istreambuf_iterator<char>());
+
+                    // Remove any trailing newlines
+                    if (!sha.empty() && sha.back() == '\n') {
+                        sha.pop_back();
+                    }
+
+                    return sha;
+                } else {
+                    throw std::runtime_error("Reference file does not exist: " + ref);
+                }
+            } else {
+                // If HEAD doesn't start with "ref: ", it might contain a SHA directly
+                return head_content;
+            }
+        } else {
+            throw std::runtime_error("HEAD file does not exist");
+        }
+    }
+
     return name;
 }
 

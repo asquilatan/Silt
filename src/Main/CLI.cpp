@@ -490,10 +490,21 @@ void setup_parser(Parser& parser) {
         true     // positional
     ));
 
+    log_cmd->add_argument(std::make_unique<Argument> (
+        "commit",
+        1,
+        "Commit to start at.",
+        false,
+        "HEAD",
+        "",
+        "",
+        false
+    ));
+
     // Register the command with the parser
     parser.add_command(std::move(init_cmd));
     parser.add_command(std::move(add_cmd));
     parser.add_command(std::move(cat_file_cmd));
     parser.add_command(std::move(hash_object_cmd));
-
+    parser.add_command(std::move(log_cmd));
 }

@@ -1,6 +1,8 @@
 #pragma once
 #include "CLI.hpp"
 #include <iostream>
+#include <set>
+#include <string>
 
 // Temp repo
 class Repository;
@@ -21,3 +23,4 @@ void cmd_rm(const ParsedArgs& args, Repository* repo);
 void cmd_show_ref(const ParsedArgs& args, Repository* repo);
 void cmd_status(const ParsedArgs& args, Repository* repo);
 void cmd_tag(const ParsedArgs& args, Repository* repo);
+std::string log_graphviz(Repository* repo, std::string sha, std::set<std::string> seen);
