@@ -11,98 +11,17 @@
 #include <sstream>
 #include <iomanip>
 #include <openssl/sha.h>
+#include <map>
+#include <variant>
+#include <iterator>
+#include "Objects.hpp"  // Include the header file to get KVLM types
 
-class GitObject {
-public:
-    // Constructor for creating a new object
-    GitObject() = default;
+// Implement the GitBlob constructor that takes a string
+GitBlob::GitBlob(const std::string& data) {
+    deserialize(data);
+}
 
-    // Constructor for deserializing from existing data
-    GitObject(const std::string& data) {
-        deserialize(data);
-    }
-
-    // Virtual destructor for proper cleanup of derived classes
-    virtual ~GitObject() = default;
-
-    virtual std::string serialize() {
-        throw std::runtime_error("Serialize method not implemented for base GitObject.");
-    }
-
-    virtual void deserialize(const std::string& data) {
-        throw std::runtime_error("Deserialize method not implemented for base GitObject.");
-    }
-
-    virtual std::string get_fmt() const {
-        throw std::runtime_error("Get_fmt method not implemented for base GitObject.");
-    }
-
-    virtual void initialize(const std::string& data) {
-
-    }
-};
-
-class GitBlob : public GitObject {
-public:
-    // Constructor for creating a new object with data
-    GitBlob(const std::string& data) {
-        blobdata = data;
-    }
-
-    // Default constructor
-    GitBlob() = default;
-
-    // overrides serialize, returns blob data
-    std::string serialize() override {
-        return blobdata;
-    }
-
-    // overrides deserialize, stores data as blobdata
-    void deserialize(const std::string& data) override {
-        blobdata = data;
-    }
-
-    // return format type
-    std::string get_fmt() const override {
-        return "blob";
-    }
-private:
-    std::string blobdata;
-};
-
-// Define other GitObject subclasses
-class GitCommit : public GitObject {
-public:
-    using GitObject::GitObject;
-    // TODO: Implement commit-specific serialize/deserialize
-
-    // return format type
-    std::string get_fmt() const override {
-        return "commit";
-    }
-};
-
-class GitTree : public GitObject {
-public:
-    using GitObject::GitObject;
-
-    // return format type
-    std::string get_fmt() const override {
-        return "tree";
-    }
-};
-
-class GitTag : public GitObject {
-public:
-    using GitObject::GitObject;
-
-    // return format type
-    std::string get_fmt() const override {
-        return "tag";
-    }
-};
-
-std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo = nullptr);
+std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo);
 
 std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sha) {
     // first 2 digits of sha
@@ -317,11 +236,11 @@ std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo) {
     return sha;
 }
 
-std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow=true) {
+std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow) {
     return name;
 }
 
-std::string object_hash(const std::string& data, const std::string& fmt, Repository* repo = nullptr) {
+std::string object_hash(const std::string& data, const std::string& fmt, Repository* repo) {
     std::unique_ptr<GitObject> obj;
 
     if (fmt == "commit") {
@@ -337,4 +256,122 @@ std::string object_hash(const std::string& data, const std::string& fmt, Reposit
     }
 
     return object_write(std::move(obj), repo);
+}
+
+KVLM kvlm_parse(const std::string& data) {
+    return kvlm_parse(data, 0, KVLM{});
+}
+
+KVLM kvlm_parse(const std::string& data, int start, KVLM dct) {
+    // find space starting from start, assign to space
+    size_t space = data.find(' ', start);
+    // find newline, assign to newline
+    size_t newline = data.find('\n', start);
+
+    // BASE CASE
+    // if space is less than 0, or newline is less than space
+    if (space == std::string::npos || newline < space) {
+        if (newline != start) {
+            throw std::runtime_error("Malformed commit/tag: expected blank line");
+        }
+        // dict at None? = data[start+1 up to the end]
+        std::string message = data.substr(start + 1);
+        dct[""] = message;
+        return dct;
+    }
+
+    // RECURSIVE CASE
+    // let the key be the data string starting from start to space
+    std::string key = data.substr(start, space - start);
+    // let the end be the start
+    size_t end = start;
+    // while true
+    while (true) {
+        // starting from end + 1, look for the position of a newline, assign to end
+        end = data.find('\n', end + 1);
+        // if data[end + 1] is not a space, break
+        if (end + 1 >= data.length() || data[end + 1] != ' ') {
+            break;
+        }
+    }
+
+    // let value be data[space + 1, up to end]
+    std::string value = data.substr(space + 1, end - (space + 1));
+    // replace all '\n ' with '\n' in value
+    size_t pos = 0;
+    while ((pos = value.find("\n ", pos)) != std::string::npos) {
+        value.replace(pos, 2, "\n");
+        pos += 1; // Move past the replaced newline
+    }
+
+    // if the key is in dct
+    if (dct.find(key) != dct.end()) {
+        // if the value of the key is a vector
+        if (std::holds_alternative<std::vector<std::string>>(dct[key])) {
+            // then push back the value
+            std::vector<std::string> vec = std::get<std::vector<std::string>>(dct[key]);
+            vec.push_back(value);
+            dct[key] = vec;
+        } else {
+            // dct[key] = [dct[key], value]
+            std::string existing_value = std::get<std::string>(dct[key]);
+            std::vector<std::string> vec = {existing_value, value};
+            dct[key] = vec;
+        }
+    } else {
+        // dct[key] = value
+        dct[key] = value;
+    }
+
+    // return kvlm_parse(data, start=end+1, dct=dct)
+    return kvlm_parse(data, end + 1, dct);
+}
+
+std::string kvlm_serialize(const KVLM& kvlm) {
+    std::string ret = "";
+
+    // output fields
+    for (const auto& pair : kvlm) {
+        std::string key = pair.first;
+        KVLMValue val = pair.second;
+
+        // skip the message itself (key == "")
+        if (key == "") continue;
+
+        std::vector<std::string> val_list;
+        // if the type of val isn't a vector
+        if (std::holds_alternative<std::string>(val)) {
+            // add element to vector
+            val_list.push_back(std::get<std::string>(val));
+        } else {
+            val_list = std::get<std::vector<std::string>>(val);
+        }
+
+        // for every value in the list
+        for (const std::string& v : val_list) {
+            // replace all '\n' with '\n ' in v
+            std::string modified_v = v;
+            size_t pos = 0;
+            while ((pos = modified_v.find("\n", pos)) != std::string::npos) {
+                // don't add space if it's already at the beginning of a new line
+                if (pos + 1 < modified_v.length() && modified_v[pos + 1] != ' ') {
+                    modified_v.replace(pos, 1, "\n ");
+                    pos += 2; // Move past the replaced newline + space
+                } else {
+                    pos += 1; // Move past the newline
+                }
+            }
+            // add to return
+            ret += key + " " + modified_v + "\n";
+        }
+    }
+
+    // Append message
+    auto msg_it = kvlm.find("");
+    if (msg_it != kvlm.end()) {
+        ret += "\n";
+        ret += std::get<std::string>(msg_it->second);
+    }
+
+    return ret;
 }

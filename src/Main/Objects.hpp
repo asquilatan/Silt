@@ -3,7 +3,17 @@
 #include <optional>
 #include <string> // Added for std::string
 #include <memory> // Added for std::unique_ptr
+#include <map>    // Added for std::map used in kvlm functions
+#include <variant> // Added for std::variant
 #include "Repository.hpp" // Added for Repository class
+
+// key-value list with message (KVLM) functions
+using KVLMValue = std::variant<std::string, std::vector<std::string>>;
+using KVLM = std::map<std::string, KVLMValue>;
+
+KVLM kvlm_parse(const std::string& data);
+KVLM kvlm_parse(const std::string& data, int start, KVLM dct);
+std::string kvlm_serialize(const KVLM& kvlm);
 
 class GitObject {
 public:
@@ -65,12 +75,23 @@ private:
 class GitCommit : public GitObject {
 public:
     using GitObject::GitObject;
-    // TODO: Implement commit-specific serialize/deserialize
+
+    // overrides serialize, returns blob data
+    std::string serialize() override {
+        return kvlm_serialize(kvlm);
+    }
+
+    // overrides deserialize, stores data as blobdata
+    void deserialize(const std::string& data) override {
+        kvlm = kvlm_parse(data);
+    }
 
     // return format type
     std::string get_fmt() const override {
         return "commit";
     }
+private:
+    KVLM kvlm;
 };
 
 class GitTree : public GitObject {
