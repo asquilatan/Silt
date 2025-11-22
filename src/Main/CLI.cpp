@@ -490,8 +490,6 @@ void setup_parser(Parser& parser) {
         true     // positional
     ));
 
-
-
     // Register the command with the parser
     parser.add_command(std::move(init_cmd));
     parser.add_command(std::move(add_cmd));
