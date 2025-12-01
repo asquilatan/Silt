@@ -1,0 +1,39 @@
+# MakeTest
+# Build and run the tree-related unit tests for Silt
+
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2
+CXXFLAGS += -Isrc/External
+CXXFLAGS += -Isrc/External/openssl
+
+TEST_TARGET = bin/treetests.exe
+
+TEST_SOURCES = src/Main/TreeTests.cpp \
+               src/Main/Objects.cpp \
+               src/Main/CLI.cpp \
+               src/Main/Commands.cpp \
+               src/Main/Repository.cpp \
+               src/Main/Index.cpp \
+               src/Main/Refs.cpp \
+               src/Main/Utils.cpp
+
+LIBS = -lz -lcrypto
+LDFLAGS = -L/mingw64/lib
+
+all: $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SOURCES) | bin
+	$(CXX) $(CXXFLAGS) -o $(TEST_TARGET) $(TEST_SOURCES) $(LDFLAGS) $(LIBS)
+
+bin:
+	mkdir -p bin
+
+run: $(TEST_TARGET)
+	@echo "Running test binary: $(TEST_TARGET)"
+	@$(TEST_TARGET)
+
+clean:
+	@if exist $(TEST_TARGET) del /Q $(TEST_TARGET)
+	@if exist bin rmdir /S /Q bin
+
+.PHONY: all run clean

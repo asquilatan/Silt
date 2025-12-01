@@ -100,8 +100,86 @@ void cat_file(Repository* repo, std::string object, std::string fmt) {
     }
 }
 
+/*
+ * Problem: cmd_checkout (Implementation)
+ * ---------------------------------------------------------------------------
+ * Description:
+ *   Implement the bridge function for the "checkout" command in Silt. This
+ *   function should parse the provided arguments, locate the specified commit
+ *   or tree object, and extract its contents to the specified directory path.
+ *   The target directory must be empty to prevent data loss.
+ *
+ * Input:
+ *   - args: ParsedArgs containing:
+ *       - "commit": A commit SHA, tree SHA, branch name, tag, or "HEAD"
+ *       - "path": The target directory path to checkout into (must be empty)
+ *   - repo: Pointer to the current Repository object
+ *
+ * Output:
+ *   - Files and directories from the commit/tree are created in the target path
+ *   - Prints error messages to stderr if checkout fails
+ *
+ * Algorithm:
+ *   1. Find the repository if not provided
+ *   2. Resolve the commit reference using object_find()
+ *   3. Read the object - if it's a commit, extract its tree reference
+ *   4. Verify target path is empty or create it
+ *   5. Call tree_checkout() to recursively extract contents
+ *
+ * Example:
+ *   Input:  args = { commit: "HEAD", path: "./output" }, repo = <valid repo>
+ *   Output: Contents of HEAD commit extracted to ./output/
+ *
+ * Constraints:
+ *   - Target path must exist and be an empty directory, OR not exist (will be created)
+ *   - If commit points to a commit object, extract its tree
+ *   - If commit points directly to a tree, use that tree
+ */
 void cmd_checkout(const ParsedArgs& args, Repository* repo) {
+    // TODO: Implement this function
     std::cout << "checkout command not yet implemented" << std::endl;
+}
+
+/*
+ * Problem: tree_checkout (Implementation)
+ * ---------------------------------------------------------------------------
+ * Description:
+ *   Recursively extract the contents of a Git tree object to a filesystem path.
+ *   For each entry in the tree:
+ *   - If it's a blob (file), read the blob and write its contents to the path
+ *   - If it's a tree (directory), create the directory and recurse into it
+ *
+ * Input:
+ *   - repo: Pointer to the Repository for reading objects
+ *   - tree: Reference to the GitTree object to extract
+ *   - target_path: Filesystem path where contents should be written
+ *
+ * Output:
+ *   - Files and directories are created in target_path matching the tree structure
+ *   - Blob contents are written as binary files
+ *   - Directories are created for tree entries before recursing
+ *
+ * Algorithm:
+ *   1. Iterate over each leaf in tree.get_leaves()
+ *   2. Construct destination path: target_path / leaf.path
+ *   3. Read the object using leaf.sha
+ *   4. If object is a tree: create directory, recurse with subtree
+ *   5. If object is a blob: write blob data to file
+ *
+ * Example:
+ *   Input:  tree with entries [ {100644, "hello.txt", sha1}, {040000, "src", sha2} ]
+ *           target_path = "/tmp/checkout"
+ *   Output: Creates /tmp/checkout/hello.txt (with blob content)
+ *                   /tmp/checkout/src/ (directory)
+ *                   /tmp/checkout/src/... (contents of subtree sha2)
+ *
+ * Constraints:
+ *   - target_path should already exist
+ *   - Symlinks (mode 120000) are optional; can treat as regular files
+ *   - Binary files should be written correctly (no text mode conversion)
+ */
+void tree_checkout(Repository* repo, const GitTree& tree, const std::filesystem::path& target_path) {
+    // TODO: Implement this function
 }
 
 void cmd_commit(const ParsedArgs& args, Repository* repo) {
@@ -279,8 +357,78 @@ void cmd_ls_files(const ParsedArgs& args, Repository* repo) {
     std::cout << "ls-files command not yet implemented" << std::endl;
 }
 
+/*
+ * Problem: cmd_ls_tree (Implementation)
+ * ---------------------------------------------------------------------------
+ * Description:
+ *   Implement the bridge function for the "ls-tree" command in Silt. This
+ *   command displays the contents of a tree object, showing the mode, type,
+ *   SHA, and name of each entry. With the recursive flag, it traverses into
+ *   subtrees and shows full paths.
+ *
+ * Input:
+ *   - args: ParsedArgs containing:
+ *       - "tree": A tree-ish reference (commit SHA, tree SHA, branch, tag, HEAD)
+ *       - "recursive": String "true" or "false" for recursive flag
+ *   - repo: Pointer to the current Repository object
+ *
+ * Output:
+ *   - Prints each tree entry in format: "<mode> <type> <sha>\t<path>"
+ *   - When recursive, shows full paths like "dir/subdir/file.txt"
+ *   - Subtrees are only printed as entries when NOT in recursive mode
+ *
+ * Example:
+ *   Input:  args = { tree: "HEAD", recursive: "false" }
+ *   Output:
+ *     100644 blob abc123...  README.md
+ *     040000 tree def456...  src
+ *
+ * Algorithm:
+ *   1. Find the repository if not provided
+ *   2. Resolve the tree-ish reference to a tree object SHA
+ *   3. Read the tree object from the object store
+ *   4. Call ls_tree() helper with the parsed tree and recursive flag
+ *
+ * Constraints:
+ *   - Must resolve tree-ish references to actual tree objects
+ *   - Recursive mode skips printing subtree entries themselves
+ */
 void cmd_ls_tree(const ParsedArgs& args, Repository* repo) {
+    // TODO: Implement this function
     std::cout << "ls-tree command not yet implemented" << std::endl;
+}
+
+/*
+ * Problem: ls_tree (Implementation)
+ * ---------------------------------------------------------------------------
+ * Description:
+ *   Implement the core logic for listing tree contents. This function takes
+ *   a parsed GitTree object and prints its entries. When recursive mode is
+ *   enabled, it descends into subtrees and prepends the parent path to create
+ *   full paths for nested entries.
+ *
+ * Input:
+ *   - repo: Pointer to the Repository for reading subtree objects
+ *   - tree: Reference to a GitTree object to list
+ *   - prefix: Current path prefix for nested entries (empty string at root)
+ *   - recursive: If true, descend into subtrees; if false, show subtrees as entries
+ *
+ * Output:
+ *   - Prints each entry to stdout in format: "<mode> <type> <sha>\t<path>"
+ *   - Path includes prefix for nested entries (e.g., "src/lib/utils.cpp")
+ *
+ * Algorithm:
+ *   1. Iterate over each leaf in tree.get_leaves()
+ *   2. Determine type from mode prefix: "04" = tree, "10" = blob, etc.
+ *   3. If recursive AND type is tree, read subtree and recurse
+ *   4. Otherwise, print the entry with full path (prefix + leaf.path)
+ *
+ * Constraints:
+ *   - Type is determined from mode: "04" prefix = tree, "10" = blob
+ *   - Mode should be zero-padded to 6 characters in output
+ */
+void ls_tree(Repository* repo, const GitTree& tree, const std::string& prefix, bool recursive) {
+    // TODO: Implement this function
 }
 
 void cmd_rev_parse(const ParsedArgs& args, Repository* repo) {
