@@ -426,3 +426,48 @@ std::string kvlm_serialize(const KVLM& kvlm) {
 
     return ret;
 }
+
+// tree_parse_one
+
+static std::string sha1_to_hex(const std::string& raw) {
+    // convert raw bytes to hex string
+    std::ostringstream oss;
+    // set the stream to hex mode with leading zeros
+    oss << std::hex << std::setfill('0');
+    // for every character in raw
+    for (unsigned char c : raw) {
+        // output the 2-digit hex representation
+        oss << std::setw(2) << static_cast<unsigned int>(c);
+    }
+    // return the hex string
+    return oss.str();
+}
+
+std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t start = 0) {
+    // find space in raw string
+    size_t space_pos = raw.find(' ', start);
+    
+    // extract mode
+    std::string mode = raw.substr(start, space_pos - start);
+
+    // if the length of mode is 5, prepend a '0'
+    if (mode.length() == 5) {
+        mode = "0" + mode;
+    }
+    
+    // find null terminator
+    size_t null_pos = raw.find('\0', space_pos);
+
+    // extract path
+    std::string path = raw.substr(space_pos + 1, null_pos - space_pos - 1);
+
+    // extract sha, convert from raw bytes to hex
+    std::string sha = sha1_to_hex(raw.substr(null_pos + 1, 20));
+
+    // create GitTreeLeaf object
+    GitTreeLeaf leaf = {mode, path, sha};
+
+    // next offset immediately after the 20-byte SHA
+    size_t next = null_pos + 1 + 20;
+    return std::make_pair(leaf, next);
+}

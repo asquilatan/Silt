@@ -48,10 +48,16 @@ std::string kvlm_serialize(const KVLM& kvlm);
  *   - path contains no null bytes
  *   - sha is exactly 40 lowercase hexadecimal characters
  */
-struct GitTreeLeaf {
+class GitTreeLeaf {
+public:
     std::string mode;
     std::string path;
     std::string sha;
+
+    GitTreeLeaf(std::string mode, std::string path, std::string sha)
+        : mode(mode), path(path), sha(sha) {}
+
+
 };
 
 /*
