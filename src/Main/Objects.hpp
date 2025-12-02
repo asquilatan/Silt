@@ -18,36 +18,6 @@ KVLM kvlm_parse(const std::string& data);
 KVLM kvlm_parse(const std::string& data, int start, KVLM dct);
 std::string kvlm_serialize(const KVLM& kvlm);
 
-/*
- * Problem: GitTreeLeaf
- * ---------------------------------------------------------------------------
- * Description:
- *   Design a structure to represent a single entry within a Git tree object.
- *   A tree entry contains metadata about a file or subdirectory: its mode
- *   (permissions and type), its path (name), and the SHA-1 hash pointing to
- *   the corresponding blob or subtree object.
- *
- * Input:
- *   - mode: A string representing the file mode (e.g., "100644" for regular
- *           file, "040000" for directory, "120000" for symlink).
- *   - path: A string representing the name of the file or directory.
- *   - sha:  A 40-character hexadecimal string representing the SHA-1 hash
- *           of the blob or tree object this entry points to.
- *
- * Output:
- *   - A GitTreeLeaf object that bundles mode, path, and sha together.
- *
- * Example:
- *   Input:  mode = "100644", path = "README.md",
- *           sha = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
- *   Output: GitTreeLeaf { mode: "100644", path: "README.md",
- *                         sha: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" }
- *
- * Constraints:
- *   - mode is 5 or 6 ASCII digits (normalize 5-digit modes to 6 by prepending '0')
- *   - path contains no null bytes
- *   - sha is exactly 40 lowercase hexadecimal characters
- */
 class GitTreeLeaf {
 public:
     std::string mode;
@@ -60,34 +30,6 @@ public:
 
 };
 
-/*
- * Problem: tree_parse_one
- * ---------------------------------------------------------------------------
- * Description:
- *   Parse a single tree entry from a raw Git tree object payload. Tree entries
- *   are stored in binary format: [mode] [space] [path] [null] [20-byte SHA].
- *   This function extracts one entry starting at the given offset and returns
- *   both the parsed leaf and the position to continue parsing from.
- *
- * Input:
- *   - raw:   A string containing the raw tree object data (may include null bytes).
- *   - start: The offset within raw to begin parsing from (default: 0).
- *
- * Output:
- *   - A pair containing:
- *     1. GitTreeLeaf: The parsed tree entry with mode, path, and sha fields.
- *     2. size_t: The offset immediately after this entry (for parsing the next one).
- *
- * Example:
- *   Input:  raw = "100644 file.txt\0<20 bytes of SHA>...", start = 0
- *   Output: { GitTreeLeaf{mode:"100644", path:"file.txt", sha:"<40-char hex>"}, 28 }
- *
- * Constraints:
- *   - raw must contain a valid tree entry starting at position start
- *   - Mode is 5 or 6 bytes followed by a space (0x20)
- *   - Path is null-terminated (0x00)
- *   - SHA is 20 raw bytes which must be converted to 40-char hex string
- */
 std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t start = 0);
 
 /*

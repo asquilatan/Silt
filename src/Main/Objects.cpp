@@ -471,3 +471,26 @@ std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t sta
     size_t next = null_pos + 1 + 20;
     return std::make_pair(leaf, next);
 }
+
+
+// tree_parse
+
+std::vector<GitTreeLeaf> tree_parse(const std::string& raw) {
+    // start at offset 0
+    size_t offset = 0;
+    // create vector to store leaves
+    std::vector<GitTreeLeaf> leaves;
+
+    // while offset is less than raw size
+    while (offset < raw.size()) {
+        // parse one leaf and get next offset
+        auto [leaf, next] = tree_parse_one(raw, offset);
+        // add leaf to vector
+        leaves.push_back(leaf);
+        // update offset
+        offset = next;
+    }
+
+    // return the vector of leaves
+    return leaves;
+}
