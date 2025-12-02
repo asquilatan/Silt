@@ -66,11 +66,6 @@ public:
     // Constructor for creating a new object
     GitObject() = default;
 
-    // Constructor for deserializing from existing data
-    GitObject(const std::string& data) {
-        deserialize(data);
-    }
-
     // Virtual destructor for proper cleanup of derived classes
     virtual ~GitObject() = default;
 
@@ -86,9 +81,7 @@ public:
         throw std::runtime_error("Get_fmt method not implemented for base GitObject.");
     }
 
-    virtual void initialize(const std::string& data) {
-
-    }
+    virtual void initialize() { }
 };
 
 class GitBlob : public GitObject {
@@ -120,7 +113,10 @@ private:
 // Define other GitObject subclasses
 class GitCommit : public GitObject {
 public:
-    using GitObject::GitObject;
+    GitCommit() = default;
+    GitCommit(const std::string& data) {
+        deserialize(data);
+    }
 
     // overrides serialize, returns blob data
     std::string serialize() override {
@@ -141,6 +137,8 @@ private:
 };
 
 class GitTree : public GitObject {
+private:
+    std::vector<GitTreeLeaf> leaves;
 public:
     /*
      * Problem: GitTree
@@ -174,26 +172,33 @@ public:
      *   - get_fmt() must return "tree"
      */
     GitTree() = default;
-    using GitObject::GitObject;
+    GitTree(const std::string& data) {
+        deserialize(data);
+    }
 
     std::string serialize() override;
     void deserialize(const std::string& data) override;
+
     std::string get_fmt() const override {
         return "tree";
     }
 
+    // Accessors for tree leaves
     const std::vector<GitTreeLeaf>& get_leaves() const;
     void set_leaves(const std::vector<GitTreeLeaf>& new_leaves);
     void add_leaf(const GitTreeLeaf& leaf);
     bool empty() const;
 
-private:
-    std::vector<GitTreeLeaf> leaves;
+    // init
+    void initialize();
 };
 
 class GitTag : public GitObject {
 public:
-    using GitObject::GitObject;
+    GitTag() = default;
+    GitTag(const std::string& data) {
+        deserialize(data);
+    }
 
     // return format type
     std::string get_fmt() const override {

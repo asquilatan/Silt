@@ -129,7 +129,8 @@ std::string log_graphviz(Repository* repo, std::string sha, std::set<std::string
  *   - Type is determined from mode: "04" prefix = tree, "10" = blob, etc.
  *   - Mode should be zero-padded to 6 characters in output
  */
-void ls_tree(Repository* repo, const GitTree& tree, const std::string& prefix, bool recursive);
+void ls_tree(Repository *repo, const GitTree &tree, const std::string &prefix, bool recursive);
+
 
 /*
  * Problem: tree_checkout

@@ -14,6 +14,7 @@
 #include <variant>
 #include <iterator>
 #include <algorithm>
+#include <iostream>
 #include "Objects.hpp"  // Include the header file to get KVLM types
 
 // Implement the GitBlob constructor that takes a string
@@ -34,10 +35,12 @@ std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sh
     strncpy(filename, sha + 2, strlen(sha) - 2);
     filename[strlen(sha) - 2] = '\0';
 
-    std::filesystem::path path = repo_file(*repo, "objects", dirname, filename);
+    std::filesystem::path path = repo_file(*repo, "objects", dirname, filename, nullptr);
 
     // if path is not a file
     if (!std::filesystem::is_regular_file(path)) {
+        delete[] dirname;
+        delete[] filename;
         return std::nullopt;
     }
 
@@ -103,7 +106,13 @@ std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sh
 
     // if the return value is not Z_STREAM_END, throw runtime err
     if (ret != Z_STREAM_END) {
-        throw std::runtime_error("Zlib inflation failed: " + std::string(zs.msg));
+        std::string error_msg = "Zlib inflation failed";
+        if (zs.msg) {
+            error_msg += ": " + std::string(zs.msg);
+        } else {
+            error_msg += " with code " + std::to_string(ret);
+        }
+        throw std::runtime_error(error_msg);
     }
 
     // find a space
@@ -166,7 +175,7 @@ std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo) {
 
     // Compute SHA1 hash
     unsigned char hash[SHA_DIGEST_LENGTH];
-    SHA1(reinterpret_cast<const unsigned char*>(result.c_str()), result.length(), hash);
+    SHA1(reinterpret_cast<const unsigned char*>(result.data()), result.length(), hash);
 
     // Convert hash to hex string
     std::stringstream sha_stream;
@@ -183,58 +192,36 @@ std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo) {
         strncpy(dirname, sha_ptr, 2);
         dirname[2] = '\0';
 
-        char* filename = new char[sha.length() - 1];
-        strncpy(filename, sha_ptr + 2, sha.length() - 2);
-        filename[sha.length() - 2] = '\0';
+        char* filename = new char[strlen(sha_ptr) - 1];
+        strncpy(filename, sha_ptr + 2, strlen(sha_ptr) - 2);
+        filename[strlen(sha_ptr) - 2] = '\0';
 
-        std::filesystem::path path = repo_file(*repo, "objects", dirname, filename);
+        std::filesystem::path path = repo_file(*repo, "objects", dirname, filename, nullptr);
 
-        // Create parent directories if they don't exist
-        std::filesystem::create_directories(path.parent_path());
-
-        // Check if the file doesn't already exist
         if (!std::filesystem::exists(path)) {
-            // Compress the result
-            z_stream zs;
-            memset(&zs, 0, sizeof(zs));
+            // Create directory if it doesn't exist
+            std::filesystem::create_directories(path.parent_path());
 
-            if (deflateInit(&zs, Z_DEFAULT_COMPRESSION) != Z_OK) {
-                throw std::runtime_error("Failed to initialize zlib compression.");
+            // Compress data
+            uLongf compressed_size = compressBound(result.length());
+            std::vector<char> compressed_data(compressed_size);
+            if (compress(reinterpret_cast<Bytef*>(compressed_data.data()), &compressed_size, reinterpret_cast<const Bytef*>(result.data()), result.length()) != Z_OK) {
+                throw std::runtime_error("Failed to compress object data.");
             }
+            compressed_data.resize(compressed_size);
 
-            zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(result.c_str()));
-            zs.avail_in = result.length();
-
-            int ret;
-            std::string compressed_data;
-            char outbuffer[32768];
-
-            do {
-                zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
-                zs.avail_out = sizeof(outbuffer);
-
-                ret = deflate(&zs, Z_SYNC_FLUSH);
-
-                if (compressed_data.size() < zs.total_out) {
-                    compressed_data.append(outbuffer, zs.total_out - compressed_data.size());
-                }
-            } while (ret == Z_OK);
-
-            deflateEnd(&zs);
-
-            // Write the compressed data to the file
+            // Write to file
             std::ofstream file(path, std::ios::binary);
-            file.write(compressed_data.c_str(), compressed_data.length());
+            file.write(compressed_data.data(), compressed_data.size());
             file.close();
         }
-
-        // Clean up allocated memory
         delete[] dirname;
         delete[] filename;
     }
 
     return sha;
 }
+
 
 std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow) {
     // If name is empty, return it as is
@@ -443,7 +430,7 @@ static std::string sha1_to_hex(const std::string& raw) {
     return oss.str();
 }
 
-std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t start = 0) {
+std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t start) {
     // find space in raw string
     size_t space_pos = raw.find(' ', start);
     
@@ -529,5 +516,35 @@ std::string tree_serialize(std::vector<GitTreeLeaf> leaves) {
     }
 
     return result;
+}
+
+// GitTree implementations
+std::string GitTree::serialize() {
+    return tree_serialize(leaves);
+}
+
+void GitTree::deserialize(const std::string& data) {
+    leaves = tree_parse(data);
+}
+
+const std::vector<GitTreeLeaf>& GitTree::get_leaves() const {
+    return leaves;
+}
+
+void GitTree::set_leaves(const std::vector<GitTreeLeaf>& new_leaves) {
+    leaves = new_leaves;
+}
+
+void GitTree::add_leaf(const GitTreeLeaf& leaf) {
+    leaves.push_back(leaf);
+}
+
+bool GitTree::empty() const {
+    return leaves.empty();
+}
+
+void GitTree::initialize() {
+    // This method can be used to initialize an empty tree
+    leaves.clear();
 }
 

@@ -357,78 +357,148 @@ void cmd_ls_files(const ParsedArgs& args, Repository* repo) {
     std::cout << "ls-files command not yet implemented" << std::endl;
 }
 
-/*
- * Problem: cmd_ls_tree (Implementation)
- * ---------------------------------------------------------------------------
- * Description:
- *   Implement the bridge function for the "ls-tree" command in Silt. This
- *   command displays the contents of a tree object, showing the mode, type,
- *   SHA, and name of each entry. With the recursive flag, it traverses into
- *   subtrees and shows full paths.
- *
- * Input:
- *   - args: ParsedArgs containing:
- *       - "tree": A tree-ish reference (commit SHA, tree SHA, branch, tag, HEAD)
- *       - "recursive": String "true" or "false" for recursive flag
- *   - repo: Pointer to the current Repository object
- *
- * Output:
- *   - Prints each tree entry in format: "<mode> <type> <sha>\t<path>"
- *   - When recursive, shows full paths like "dir/subdir/file.txt"
- *   - Subtrees are only printed as entries when NOT in recursive mode
- *
- * Example:
- *   Input:  args = { tree: "HEAD", recursive: "false" }
- *   Output:
- *     100644 blob abc123...  README.md
- *     040000 tree def456...  src
- *
- * Algorithm:
- *   1. Find the repository if not provided
- *   2. Resolve the tree-ish reference to a tree object SHA
- *   3. Read the tree object from the object store
- *   4. Call ls_tree() helper with the parsed tree and recursive flag
- *
- * Constraints:
- *   - Must resolve tree-ish references to actual tree objects
- *   - Recursive mode skips printing subtree entries themselves
- */
 void cmd_ls_tree(const ParsedArgs& args, Repository* repo) {
-    // TODO: Implement this function
-    std::cout << "ls-tree command not yet implemented" << std::endl;
+    // get the tree-ish reference
+    std::string tree_ref = args.get("tree");
+    std::string recursive_str = args.get("recursive");
+    bool recursive = (recursive_str == "true");
+
+    // find the repository if not provided
+    std::optional<Repository> found_repo;
+    if (!repo) {
+        found_repo = repo_find(std::filesystem::current_path(), true);
+        // if found_repo is not None
+        if (found_repo.has_value()) {
+            repo = &found_repo.value();
+        } else {
+            std::cerr << "Error: Not a Git repository." << std::endl;
+            return;
+        }
+    }
+
+    // resolve the tree-ish reference to a tree SHA
+    // first try to resolve as a tree
+    std::string tree_sha = object_find(repo, tree_ref, "tree", true);
+
+    // if that didn't work, try to resolve as a commit and get its tree
+    if (tree_sha.empty()) {
+        // resolve the tree-ish reference to a commit SHA
+        tree_sha = object_find(repo, tree_ref, "commit", true);
+        // if we found a commit
+        if (!tree_sha.empty()) {
+            // read the commit object to get its tree SHA
+            std::optional<std::unique_ptr<GitObject>> obj_opt = object_read(repo, const_cast<char*>(tree_sha.c_str()));
+            // if obj is not None
+            if (obj_opt.has_value()) {
+                // cast obj to GitCommit
+                std::unique_ptr<GitObject> obj = std::move(obj_opt.value());
+                // if obj is a commit
+                if (obj->get_fmt() == "commit") {
+                    GitCommit* commit = dynamic_cast<GitCommit*>(obj.get());
+                    // if commit is not None
+                    if (commit) {
+                        // get the tree SHA from the commit's kvlm
+                        std::string serialized = commit->serialize();
+                        // parse kvlm to get tree
+                        KVLM kvlm = kvlm_parse(serialized);
+                        // find "tree" in kvlm
+                        auto tree_it = kvlm.find("tree");
+                        // if the tree key exists and is a string
+                        if (tree_it != kvlm.end() && std::holds_alternative<std::string>(tree_it->second)) {
+                            // assign tree_sha
+                            tree_sha = std::get<std::string>(tree_it->second);
+                        } else {
+                            std::cerr << "Error: Could not find tree in commit." << std::endl;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (tree_sha.empty()) {
+        std::cerr << "Error: Could not resolve tree reference '" << tree_ref << "'." << std::endl;
+        return;
+    }
+
+    // Read the tree object
+    std::optional<std::unique_ptr<GitObject>> tree_obj_opt = object_read(repo, const_cast<char*>(tree_sha.c_str()));
+    if (!tree_obj_opt.has_value()) {
+        std::cerr << "Error: Could not read tree object '" << tree_sha << "'." << std::endl;
+        return;
+    }
+
+    std::unique_ptr<GitObject> tree_obj = std::move(tree_obj_opt.value());
+    if (tree_obj->get_fmt() != "tree") {
+        std::cerr << "Error: Object '" << tree_sha << "' is not a tree." << std::endl;
+        return;
+    }
+
+    // Cast to GitTree
+    GitTree* tree = dynamic_cast<GitTree*>(tree_obj.get());
+    if (!tree) {
+        std::cerr << "Error: Could not cast object to tree." << std::endl;
+        return;
+    }
+
+    // Call ls_tree helper with empty prefix
+    ls_tree(repo, *tree, "", recursive);
 }
 
-/*
- * Problem: ls_tree (Implementation)
- * ---------------------------------------------------------------------------
- * Description:
- *   Implement the core logic for listing tree contents. This function takes
- *   a parsed GitTree object and prints its entries. When recursive mode is
- *   enabled, it descends into subtrees and prepends the parent path to create
- *   full paths for nested entries.
- *
- * Input:
- *   - repo: Pointer to the Repository for reading subtree objects
- *   - tree: Reference to a GitTree object to list
- *   - prefix: Current path prefix for nested entries (empty string at root)
- *   - recursive: If true, descend into subtrees; if false, show subtrees as entries
- *
- * Output:
- *   - Prints each entry to stdout in format: "<mode> <type> <sha>\t<path>"
- *   - Path includes prefix for nested entries (e.g., "src/lib/utils.cpp")
- *
- * Algorithm:
- *   1. Iterate over each leaf in tree.get_leaves()
- *   2. Determine type from mode prefix: "04" = tree, "10" = blob, etc.
- *   3. If recursive AND type is tree, read subtree and recurse
- *   4. Otherwise, print the entry with full path (prefix + leaf.path)
- *
- * Constraints:
- *   - Type is determined from mode: "04" prefix = tree, "10" = blob
- *   - Mode should be zero-padded to 6 characters in output
- */
 void ls_tree(Repository* repo, const GitTree& tree, const std::string& prefix, bool recursive) {
-    // TODO: Implement this function
+    // get all leaves from the tree
+    const auto& leaves = tree.get_leaves();
+
+    // for each leaf in the tree
+    for (const auto& leaf : leaves) {
+        // determine the type based on the mode prefix
+        std::string type;
+        if (leaf.mode.size() < 2) {
+            std::cerr << "Error: Mode too short: '" << leaf.mode << "'" << std::endl;
+            continue;
+        }
+        if (leaf.mode.substr(0, 2) == "04") {
+            type = "tree";
+        } else if (leaf.mode.substr(0, 2) == "10") {
+            type = "blob";
+        } else if (leaf.mode.substr(0, 2) == "12") {
+            type = "blob";
+        } else if (leaf.mode.substr(0, 2) == "16") {
+            type = "commit";
+        } else {
+            // raise error for unknown mode
+            std::cerr << "Error: Unknown mode '" << leaf.mode << "' for path '"
+                     << leaf.path << "'." << std::endl;
+            continue;
+        }
+
+        // Construct the full path with prefix
+        std::string full_path = prefix + leaf.path;
+
+        // If recursive mode is enabled and this is a tree
+        if (recursive && type == "tree") {
+            // read the subtree object
+            std::optional<std::unique_ptr<GitObject>> subtree_obj_opt = object_read(repo, const_cast<char*>(leaf.sha.c_str()));
+            // if the subtree object exists
+            if (subtree_obj_opt.has_value()) {
+                std::unique_ptr<GitObject> subtree_obj = std::move(subtree_obj_opt.value());
+                // if the subtree object is a tree
+                if (subtree_obj->get_fmt() == "tree") {
+                    // cast to GitTree
+                    GitTree* subtree = dynamic_cast<GitTree*>(subtree_obj.get());
+                    if (subtree) {
+                        // recursively list the subtree with the new prefix
+                        ls_tree(repo, *subtree, full_path + "/", recursive);
+                    }
+                }
+            }
+        // if it's a leaf
+        } else {
+            // print the entry: mode type sha\tpath
+            std::cout << leaf.mode << " " << type << " " << leaf.sha << "\t" << full_path << std::endl;
+        }
+    }
 }
 
 void cmd_rev_parse(const ParsedArgs& args, Repository* repo) {

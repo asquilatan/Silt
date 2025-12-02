@@ -501,35 +501,6 @@ void setup_parser(Parser& parser) {
         false
     ));
 
-    /*
-     * Problem: ls-tree argument for Silt
-     * -------------------------------------------------------------------------
-     * Description:
-     *   Configure the argument parser for the "ls-tree" command. The command
-     *   requires a tree-ish reference (commit, tree SHA, branch, tag, or HEAD)
-     *   and supports an optional recursive flag to descend into subtrees.
-     *
-     * Input (command-line):
-     *   silt ls-tree [-r|--recursive] <tree>
-     *   - tree: Required positional argument specifying the tree-ish reference
-     *   - -r/--recursive: Optional flag to recurse into subtrees
-     *
-     * Output:
-     *   - ParsedArgs with:
-     *     - "tree": The tree-ish reference string
-     *     - "recursive": "true" if -r flag present, "false" otherwise
-     *
-     * Example:
-     *   Input:  silt ls-tree HEAD
-     *   Output: ParsedArgs { tree: "HEAD", recursive: "false" }
-     *
-     *   Input:  silt ls-tree -r abc123
-     *   Output: ParsedArgs { tree: "abc123", recursive: "true" }
-     *
-     * Constraints:
-     *   - "tree" argument is required (positional)
-     *   - "recursive" is optional flag, defaults to "false"
-     */
     ls_tree_cmd->add_argument(std::make_unique<Argument> (
         "recursive",
         0,                   // flag (no value)
@@ -552,36 +523,6 @@ void setup_parser(Parser& parser) {
         true                 // positional
     ));
 
-    /*
-     * Problem: checkout argument for Silt
-     * -------------------------------------------------------------------------
-     * Description:
-     *   Configure the argument parser for the "checkout" command. The command
-     *   requires a commit reference and a target directory path. The commit
-     *   can be any commit-ish reference, and the path must point to an empty
-     *   directory (or one that will be created).
-     *
-     * Input (command-line):
-     *   silt checkout <commit> <path>
-     *   - commit: Required positional argument specifying the commit/tree to checkout
-     *   - path: Required positional argument specifying the target directory
-     *
-     * Output:
-     *   - ParsedArgs with:
-     *     - "commit": The commit-ish reference string
-     *     - "path": The target directory path string
-     *
-     * Example:
-     *   Input:  silt checkout HEAD ./output
-     *   Output: ParsedArgs { commit: "HEAD", path: "./output" }
-     *
-     *   Input:  silt checkout abc123 /tmp/checkout
-     *   Output: ParsedArgs { commit: "abc123", path: "/tmp/checkout" }
-     *
-     * Constraints:
-     *   - Both "commit" and "path" are required positional arguments
-     *   - Arguments are parsed in order: commit first, then path
-     */
     checkout_cmd->add_argument(std::make_unique<Argument> (
         "commit",
         1,
