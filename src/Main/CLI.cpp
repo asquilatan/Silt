@@ -545,6 +545,18 @@ void setup_parser(Parser& parser) {
         true                 // positional
     ));
 
+    show_ref_cmd->add_argument(std::make_unique<Argument> (
+        "name",
+        1,
+        "List references.",
+        false,               // not required
+        "",                  // default_value
+        "",                  // short_opt
+        "",                  // long_opt
+        true                 // positional
+    ));
+
+
     // Register the command with the parser
     parser.add_command(std::move(init_cmd));
     parser.add_command(std::move(add_cmd));
@@ -553,4 +565,5 @@ void setup_parser(Parser& parser) {
     parser.add_command(std::move(log_cmd));
     parser.add_command(std::move(ls_tree_cmd));
     parser.add_command(std::move(checkout_cmd));
+    parser.add_command(std::move(show_ref_cmd));
 }

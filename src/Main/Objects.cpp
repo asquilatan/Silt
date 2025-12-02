@@ -483,13 +483,9 @@ std::vector<GitTreeLeaf> tree_parse(const std::string& raw) {
 
 // tree_leaf_sort_key
 std::string tree_leaf_sort_key(const GitTreeLeaf& leaf) {
-    // if the mode is 40000, prepend a '/' to the path (to indicate directory)
-    if (leaf.mode == "40000") {
-        return "/" + leaf.path;
-    } else {
-        // otherwise, return the path as is
-        return leaf.path;
-    }
+    // if it starts with 10, return leaf path
+    // otherwise, return leaf path + '/'
+    
 }
 
 // tree_serialize

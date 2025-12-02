@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <iostream>
+#include <map>
 #include <cstdarg>
 #include <fstream>
 #include "Repository.hpp"
@@ -230,4 +231,70 @@ std::optional<Repository> repo_find(std::filesystem::path path, bool required) {
 
     // recurse, pass parent
     return repo_find(parent, required);
+}
+
+
+std::optional<std::string> ref_resolve(const Repository& repo, const std::string& ref) {
+    // get the path via repo file
+    std::filesystem::path path = repo.gitdir / ref;
+    
+    // if the path is not a file , return nothing
+    if (!std::filesystem::exists(path)) {
+        return std::nullopt;
+    }
+
+    // read the file and 
+    std::ifstream file(path);
+    std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    
+    // trim trailing newline
+    if (!data.empty() && (data.back() == '\n' || data.back() == '\r')) {
+        data.pop_back();
+    }
+    
+    // if it starts with ref: return ref_resolve on repo and data starting from the 6th character
+    if (data.rfind("ref: ", 0) == 0) {
+        return ref_resolve(repo, data.substr(5));
+        // else return data
+    } else {
+        return data;
+    }
+}
+
+std::map<std::string, std::string> ref_list(const Repository& repo, const std::filesystem::path& path_prefix) {
+    
+    std::filesystem::path start_path;
+    // if path doesn't exist
+    if (path_prefix.empty()) {
+        // let path be repo_dir repo with refs
+        start_path = repo.gitdir / "refs";
+        } else {
+            start_path = path_prefix;
+        }
+        
+        // create a hashmap, assign to return value
+        std::map<std::string, std::string> refs;
+        if (!std::filesystem::exists(start_path)) {
+            return refs;
+        }
+        // for each file in the sorted directories in path
+        for (const auto& entry : std::filesystem::directory_iterator(start_path)) {
+            std::filesystem::path full_path = entry.path();
+            std::string relative_path = std::filesystem::relative(full_path, repo.gitdir).string();
+            std::replace(relative_path.begin(), relative_path.end(), '\\', '/');
+            
+            // if the joined path is a directory
+            if (std::filesystem::is_directory(full_path)) {
+                // recursively call ref_list on repo and joined path, assign to hashmap at file
+                refs.merge(ref_list(repo, full_path));
+            // else
+            } else {
+                // call ref_resolve on repo and joined path, assign to hashmap at file
+                auto resolved_sha = ref_resolve(repo, relative_path);
+                if(resolved_sha)
+                refs[relative_path] = *resolved_sha;
+            }
+        }
+    // return hashmap
+    return refs;
 }
