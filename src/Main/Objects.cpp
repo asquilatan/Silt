@@ -474,7 +474,6 @@ std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t sta
 
 
 // tree_parse
-
 std::vector<GitTreeLeaf> tree_parse(const std::string& raw) {
     // start at offset 0
     size_t offset = 0;
@@ -493,4 +492,15 @@ std::vector<GitTreeLeaf> tree_parse(const std::string& raw) {
 
     // return the vector of leaves
     return leaves;
+}
+
+// tree_leaf_sort_key
+std::string tree_leaf_sort_key(const GitTreeLeaf& leaf) {
+    // if the mode is 40000, prepend a '/' to the path (to indicate directory)
+    if (leaf.mode == "40000") {
+        return "/" + leaf.path;
+    } else {
+        // otherwise, return the path as is
+        return leaf.path;
+    }
 }

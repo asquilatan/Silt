@@ -32,29 +32,6 @@ public:
 
 std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t start = 0);
 
-/*
- * Problem: tree_parse
- * ---------------------------------------------------------------------------
- * Description:
- *   Parse an entire Git tree object payload into a list of tree entries.
- *   A tree object is simply the concatenation of multiple entries, each in
- *   the format parsed by tree_parse_one. This function iterates through the
- *   raw data until all entries have been extracted.
- *
- * Input:
- *   - raw: A string containing the complete raw tree object data.
- *
- * Output:
- *   - A vector of GitTreeLeaf objects, one for each entry in the tree.
- *
- * Example:
- *   Input:  raw = "<entry1><entry2><entry3>" (binary concatenation)
- *   Output: [ GitTreeLeaf{...}, GitTreeLeaf{...}, GitTreeLeaf{...} ]
- *
- * Constraints:
- *   - raw must be a valid Git tree object payload
- *   - The function should handle empty trees (raw.empty() returns empty vector)
- */
 std::vector<GitTreeLeaf> tree_parse(const std::string& raw);
 
 /*
