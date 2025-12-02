@@ -1,6 +1,5 @@
 #include <stdexcept>
 #include <cstddef>
-#include <stdexcept>
 #include <optional>
 #include "Repository.hpp"
 #include <cstring>
@@ -14,6 +13,7 @@
 #include <map>
 #include <variant>
 #include <iterator>
+#include <algorithm>
 #include "Objects.hpp"  // Include the header file to get KVLM types
 
 // Implement the GitBlob constructor that takes a string
@@ -504,3 +504,30 @@ std::string tree_leaf_sort_key(const GitTreeLeaf& leaf) {
         return leaf.path;
     }
 }
+
+// tree_serialize
+std::string tree_serialize(std::vector<GitTreeLeaf> leaves) {
+    // sort leaves using tree_leaf_sort_key, ascending order
+    std::sort(leaves.begin(), leaves.end(), [](const GitTreeLeaf& a, const GitTreeLeaf& b) {
+        return tree_leaf_sort_key(a) < tree_leaf_sort_key(b);
+    });
+
+    // create string to store result
+    std::string result;
+
+    // for each leaf in leaves
+    for (const auto& leaf : leaves) {
+        // append mode + space + path + null terminator
+        result += leaf.mode + " " + leaf.path + '\0';
+
+        // convert sha from hex to raw bytes and append
+        for (size_t i = 0; i < leaf.sha.length(); i += 2) {
+            std::string byte_string = leaf.sha.substr(i, 2);
+            char byte = static_cast<char>(std::stoul(byte_string, nullptr, 16));
+            result += byte;
+        }
+    }
+
+    return result;
+}
+

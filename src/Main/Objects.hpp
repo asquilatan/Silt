@@ -31,36 +31,7 @@ public:
 };
 
 std::pair<GitTreeLeaf, size_t> tree_parse_one(const std::string& raw, size_t start = 0);
-
 std::vector<GitTreeLeaf> tree_parse(const std::string& raw);
-
-/*
- * Problem: tree_leaf_sort_key
- * ---------------------------------------------------------------------------
- * Description:
- *   Generate a sort key for a GitTreeLeaf to ensure trees are serialized in
- *   Git's canonical order. Git sorts tree entries by name, but directories
- *   (trees) are sorted as if they had a trailing slash. This ensures that
- *   "foo" (directory) sorts after "foo.c" (file) rather than before.
- *
- * Input:
- *   - leaf: A GitTreeLeaf object to generate a sort key for.
- *
- * Output:
- *   - A string that can be used as a sort key. For files, return the path.
- *     For directories (mode starts with "04"), return path + "/".
- *
- * Example:
- *   Input:  leaf = { mode: "100644", path: "foo.c", sha: "..." }
- *   Output: "foo.c"
- *
- *   Input:  leaf = { mode: "040000", path: "foo", sha: "..." }
- *   Output: "foo/"
- *
- * Constraints:
- *   - Directory entries have mode starting with "04" (e.g., "040000")
- *   - File entries have mode starting with "10" (regular), "12" (symlink), etc.
- */
 std::string tree_leaf_sort_key(const GitTreeLeaf& leaf);
 
 /*
