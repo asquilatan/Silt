@@ -100,86 +100,186 @@ void cat_file(Repository* repo, std::string object, std::string fmt) {
     }
 }
 
-/*
- * Problem: cmd_checkout (Implementation)
- * ---------------------------------------------------------------------------
- * Description:
- *   Implement the bridge function for the "checkout" command in Silt. This
- *   function should parse the provided arguments, locate the specified commit
- *   or tree object, and extract its contents to the specified directory path.
- *   The target directory must be empty to prevent data loss.
- *
- * Input:
- *   - args: ParsedArgs containing:
- *       - "commit": A commit SHA, tree SHA, branch name, tag, or "HEAD"
- *       - "path": The target directory path to checkout into (must be empty)
- *   - repo: Pointer to the current Repository object
- *
- * Output:
- *   - Files and directories from the commit/tree are created in the target path
- *   - Prints error messages to stderr if checkout fails
- *
- * Algorithm:
- *   1. Find the repository if not provided
- *   2. Resolve the commit reference using object_find()
- *   3. Read the object - if it's a commit, extract its tree reference
- *   4. Verify target path is empty or create it
- *   5. Call tree_checkout() to recursively extract contents
- *
- * Example:
- *   Input:  args = { commit: "HEAD", path: "./output" }, repo = <valid repo>
- *   Output: Contents of HEAD commit extracted to ./output/
- *
- * Constraints:
- *   - Target path must exist and be an empty directory, OR not exist (will be created)
- *   - If commit points to a commit object, extract its tree
- *   - If commit points directly to a tree, use that tree
- */
 void cmd_checkout(const ParsedArgs& args, Repository* repo) {
-    // TODO: Implement this function
-    std::cout << "checkout command not yet implemented" << std::endl;
+    // get the commit reference and path
+    std::string commit_ref = args.get("commit");
+    std::string path_arg = args.get("path");
+
+    // if the commit or path is empty, print error and return
+    if (commit_ref.empty()) {
+        std::cerr << "Error: commit argument is required." << std::endl;
+        return;
+    }
+
+    if (path_arg.empty()) {
+        std::cerr << "Error: path argument is required." << std::endl;
+        return;
+    }
+
+    // find the repository if not provided
+    std::optional<Repository> found_repo;
+    if (!repo) {
+        found_repo = repo_find(std::filesystem::current_path(), true);
+        if (found_repo.has_value()) {
+            repo = &found_repo.value();
+        } else {
+            std::cerr << "Error: Not a Git repository." << std::endl;
+            return;
+        }
+    }
+
+    // resolve commit reference to SHA
+    std::string resolved = object_find(repo, commit_ref, "", true);
+    if (resolved.empty()) {
+        std::cerr << "Error: Could not resolve reference '" << commit_ref << "'." << std::endl;
+        return;
+    }
+
+    // read the object
+    auto obj_opt = object_read(repo, const_cast<char*>(resolved.c_str()));
+    // if the object is not found, print error and return
+    if (!obj_opt.has_value()) {
+        std::cerr << "Error: Could not read object '" << resolved << "'." << std::endl;
+        return;
+    }
+
+    // determine if it's a commit or tree
+    std::unique_ptr<GitObject> obj = std::move(obj_opt.value());
+    std::unique_ptr<GitObject> tree_obj;
+
+    // if the object is a commit
+    if (obj->get_fmt() == "commit") {
+        // cast to GitCommit
+        GitCommit* commit = dynamic_cast<GitCommit*>(obj.get());
+        if (!commit) {
+            // if the cast fails, print error and return
+            std::cerr << "Error: Failed to interpret commit object." << std::endl;
+            return;
+        }
+
+        // parse the commit
+        KVLM kvlm = kvlm_parse(commit->serialize());
+        // find the tree
+        auto tree_it = kvlm.find("tree");
+        // if the tree is not found, print error and return
+        if (tree_it == kvlm.end() || !std::holds_alternative<std::string>(tree_it->second)) {
+            std::cerr << "Error: Commit does not contain a tree." << std::endl;
+            return;
+        }
+
+        // read the tree object
+        std::string tree_sha = std::get<std::string>(tree_it->second);
+        auto tree_opt = object_read(repo, const_cast<char*>(tree_sha.c_str()));
+        if (!tree_opt.has_value()) {
+            // if the tree object is not found, print error and return
+            std::cerr << "Error: Could not read tree '" << tree_sha << "'." << std::endl;
+            return;
+        }
+        tree_obj = std::move(tree_opt.value());
+    // if the object is a tree
+    } else if (obj->get_fmt() == "tree") {
+        tree_obj = std::move(obj);
+    // else, print error and return
+    } else {
+        std::cerr << "Error: Object '" << resolved << "' is not a commit or tree." << std::endl;
+        return;
+    }
+
+    // cast tree_obj to GitTree
+    GitTree* tree = dynamic_cast<GitTree*>(tree_obj.get());
+    if (!tree) {
+        std::cerr << "Error: Failed to interpret target tree." << std::endl;
+        return;
+    }
+
+    // prepare target path
+    std::filesystem::path target_path = path_arg;
+    try {
+        // if the target path exists, check if it's a directory and empty
+        if (std::filesystem::exists(target_path)) {
+            // if it's not a directory
+            if (!std::filesystem::is_directory(target_path)) {
+                std::cerr << "Error: Target path must be a directory." << std::endl;
+                return;
+            }
+            // if it's not empty
+            if (!std::filesystem::is_empty(target_path)) {
+                std::cerr << "Error: Target directory must be empty." << std::endl;
+                return;
+            }
+        } else {
+            std::filesystem::create_directories(target_path);
+        }
+    // catch any filesystem errors
+    } catch (const std::exception& e) {
+        std::cerr << "Error preparing target path: " << e.what() << std::endl;
+        return;
+    }
+
+    // perform checkout
+    tree_checkout(repo, *tree, target_path);
 }
 
-/*
- * Problem: tree_checkout (Implementation)
- * ---------------------------------------------------------------------------
- * Description:
- *   Recursively extract the contents of a Git tree object to a filesystem path.
- *   For each entry in the tree:
- *   - If it's a blob (file), read the blob and write its contents to the path
- *   - If it's a tree (directory), create the directory and recurse into it
- *
- * Input:
- *   - repo: Pointer to the Repository for reading objects
- *   - tree: Reference to the GitTree object to extract
- *   - target_path: Filesystem path where contents should be written
- *
- * Output:
- *   - Files and directories are created in target_path matching the tree structure
- *   - Blob contents are written as binary files
- *   - Directories are created for tree entries before recursing
- *
- * Algorithm:
- *   1. Iterate over each leaf in tree.get_leaves()
- *   2. Construct destination path: target_path / leaf.path
- *   3. Read the object using leaf.sha
- *   4. If object is a tree: create directory, recurse with subtree
- *   5. If object is a blob: write blob data to file
- *
- * Example:
- *   Input:  tree with entries [ {100644, "hello.txt", sha1}, {040000, "src", sha2} ]
- *           target_path = "/tmp/checkout"
- *   Output: Creates /tmp/checkout/hello.txt (with blob content)
- *                   /tmp/checkout/src/ (directory)
- *                   /tmp/checkout/src/... (contents of subtree sha2)
- *
- * Constraints:
- *   - target_path should already exist
- *   - Symlinks (mode 120000) are optional; can treat as regular files
- *   - Binary files should be written correctly (no text mode conversion)
- */
 void tree_checkout(Repository* repo, const GitTree& tree, const std::filesystem::path& target_path) {
-    // TODO: Implement this function
+    // get the leaves of the tree
+    const auto& leaves = tree.get_leaves();
+
+    // for each leaf in the tree
+    for (const auto& leaf : leaves) {
+        // read the object
+        auto obj_opt = object_read(repo, const_cast<char*>(leaf.sha.c_str()));
+        // if the object is not found, print warning and continue
+        if (!obj_opt.has_value()) {
+            std::cerr << "Warning: Unable to read object '" << leaf.sha << "'." << std::endl;
+            continue;
+        }
+
+        // process based on object type
+        std::unique_ptr<GitObject> obj = std::move(obj_opt.value());
+        std::filesystem::path destination = target_path / leaf.path;
+
+        // if the object is a tree, recurse
+        if (obj->get_fmt() == "tree") {
+            try {
+                // create the directory
+                std::filesystem::create_directories(destination);
+            } catch (const std::exception& e) {
+                // if the directory could not be created, print warning and continue
+                std::cerr << "Warning: Could not create directory '" << destination.string() << "': " << e.what() << std::endl;
+                continue;
+            }
+
+            // cast the object to a tree
+            GitTree* subtree = dynamic_cast<GitTree*>(obj.get());
+            // if the cast was successful, recurse
+            if (subtree) {
+                tree_checkout(repo, *subtree, destination);
+            }
+        // if the object is a blob, write to file
+        } else if (obj->get_fmt() == "blob") {
+            // ensure parent directories exist
+            if (destination.has_parent_path()) {
+                std::error_code ec;
+                std::filesystem::create_directories(destination.parent_path(), ec);
+            }
+
+            // write blob data to file
+            std::ofstream file(destination, std::ios::binary);
+
+            // if file could not be opened, print warning and continue
+            if (!file.is_open()) {
+                std::cerr << "Warning: Could not write file '" << destination.string() << "'." << std::endl;
+                continue;
+            }
+
+            // serialize the object and write to file
+            std::string data = obj->serialize();
+            file.write(data.data(), data.size());
+        } else {
+            // unsupported object type
+            std::cerr << "Warning: Unsupported object type '" << obj->get_fmt() << "' for path '" << leaf.path << "'." << std::endl;
+        }
+    }
 }
 
 void cmd_commit(const ParsedArgs& args, Repository* repo) {
