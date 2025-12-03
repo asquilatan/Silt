@@ -140,37 +140,7 @@ class GitTree : public GitObject {
 private:
     std::vector<GitTreeLeaf> leaves;
 public:
-    /*
-     * Problem: GitTree
-     * -------------------------------------------------------------------------
-     * Description:
-     *   Implement a GitTree class that represents a Git tree object. A tree
-     *   object maps names to blobs (files) and other trees (subdirectories).
-     *   The class must support deserialization from raw Git object data and
-     *   serialization back to the canonical binary format.
-     *
-     * Input (for deserialization):
-     *   - data: Raw tree object payload as stored in Git's object database.
-     *
-     * Output (for serialization):
-     *   - A binary string in Git's tree format, properly sorted.
-     *
-     * Example:
-     *   Input:  Raw tree data containing entries for "README.md" and "src/"
-     *   Output: Serialized tree with entries in lexicographic order
-     *
-     * Methods Required:
-     *   - serialize():    Convert internal leaves to raw binary format
-     *   - deserialize():  Parse raw binary data into internal leaves
-     *   - get_leaves():   Return const reference to parsed entries
-     *   - set_leaves():   Replace all entries
-     *   - add_leaf():     Append a single entry
-     *   - empty():        Check if tree has no entries
-     *
-     * Constraints:
-     *   - Must maintain entries in sorted order after serialization
-     *   - get_fmt() must return "tree"
-     */
+    // Constructor for creating a new object with data
     GitTree() = default;
     GitTree(const std::string& data) {
         deserialize(data);
@@ -193,12 +163,10 @@ public:
     void initialize();
 };
 
-class GitTag : public GitObject {
+class GitTag : public GitCommit {
 public:
     GitTag() = default;
-    GitTag(const std::string& data) {
-        deserialize(data);
-    }
+    GitTag(const std::string& data) : GitCommit(data) {}
 
     // return format type
     std::string get_fmt() const override {

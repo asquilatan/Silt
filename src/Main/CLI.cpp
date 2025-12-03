@@ -556,6 +556,38 @@ void setup_parser(Parser& parser) {
         true                 // positional
     ));
 
+    tag_cmd->add_argument(std::make_unique<Argument> (
+        "name",
+        1,
+        "The new tag's name",
+        false,                // required
+        "",                  // default_value
+        "",                  // short_opt
+        "",                  // long_opt
+        true                 // positional
+    ));
+
+    tag_cmd->add_argument(std::make_unique<Argument> (
+        "annotate",
+        0,                   // flag (no value)
+        "Make an annotated tag",
+        false,               // not required
+        "false",             // default_value
+        "a",                 // short_opt
+        "annotate",          // long_opt
+        false                // not positional
+    ));
+
+    tag_cmd->add_argument(std::make_unique<Argument> (
+        "object",
+        1,
+        "The object the new tag will point to",
+        false,               // not required
+        "HEAD",              // default_value
+        "",                  // short_opt
+        "",                  // long_opt
+        false                // not positional
+    ));
 
     // Register the command with the parser
     parser.add_command(std::move(init_cmd));
@@ -566,4 +598,5 @@ void setup_parser(Parser& parser) {
     parser.add_command(std::move(ls_tree_cmd));
     parser.add_command(std::move(checkout_cmd));
     parser.add_command(std::move(show_ref_cmd));
+    parser.add_command(std::move(tag_cmd));
 }

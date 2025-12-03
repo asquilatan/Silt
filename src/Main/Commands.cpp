@@ -7,6 +7,27 @@
 #include "Repository.hpp" // Include the header for Repository
 #include <filesystem>
 #include <set>
+#include <map>
+#include <algorithm>
+#include <cctype>
+
+// Helper to parse boolean flags from ParsedArgs:
+// - If the flag is not present, return false.
+// - If the flag is present but has no value, return true.
+// - If a value is provided, parse common truthy strings ("true","1","yes","on")
+bool parse_bool_flag(const ParsedArgs& args, const std::string& key) {
+    if (!args.exists(key)) {
+        return false;
+    }
+    std::string val = args.get(key);
+    if (val.empty()) {
+        return true;
+    }
+    std::string lower = val;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+    return (lower == "true" || lower == "1" || lower == "yes" || lower == "on");
+}
 
 // Implementation of cmd_add to handle multiple paths from positional_args
 void cmd_add(const ParsedArgs& args, Repository* repo) {
@@ -606,7 +627,20 @@ void cmd_rev_parse(const ParsedArgs& args, Repository* repo) {
 }
 
 void cmd_show_ref(const ParsedArgs& args, Repository* repo) {
-    std::cout << "show-ref command not yet implemented" << std::endl;
+    // get repo
+    std::map<std::string, std::string> refs = ref_list(*repo, std::filesystem::path());
+    // call show ref
+    show_ref(repo, refs, true, "refs");
+}
+
+void show_ref(Repository* repo, const std::map<std::string, std::string>& refs, bool with_hash, const std::string& prefix) {
+    // for every key val in refs
+    for (const auto& [path, sha] : refs) {
+        if (with_hash && !sha.empty()) {
+            std::cout << sha << " ";
+        }
+        std::cout << path << std::endl;
+    }
 }
 
 void cmd_status(const ParsedArgs& args, Repository* repo) {
@@ -614,5 +648,75 @@ void cmd_status(const ParsedArgs& args, Repository* repo) {
 }
 
 void cmd_tag(const ParsedArgs& args, Repository* repo) {
-    std::cout << "tag command not yet implemented" << std::endl;
+    std::string name = args.get("name");
+    std::string object = args.get("object");
+
+    // Handle positional arguments if name is not provided via flag
+    if (name.empty() && !args.positional_args.empty()) {
+        name = args.positional_args[0];
+        if (args.positional_args.size() > 1) {
+            object = args.positional_args[1];
+        }
+    }
+
+    // if name is not empty
+    if (!name.empty()) {
+        bool append_flag = parse_bool_flag(args, "append");
+        tag_create(repo, name, object, append_flag);
+    } else {
+        std::map<std::string, std::string> refs = ref_list(*repo, repo->gitdir / "refs" / "tags");
+        // for every key val in refs
+        for (const auto& [path, sha] : refs) {
+            // print only the tag name (remove refs/tags/)
+            // path is relative to .git, so it is refs/tags/name
+            if (path.rfind("refs/tags/", 0) == 0) {
+                std::cout << path.substr(10) << std::endl;
+            } else {
+                std::cout << path << std::endl;
+            }
+        }
+    }
+
+}
+
+// tag_create(repo, name, ref, create_tag_object=False)
+void tag_create(Repository* repo, const std::string& name, const std::string& ref, bool create_tag_object) {
+    // object find sha using repo and ref
+    std::string sha = object_find(repo, ref, "commit", true);
+
+    if (create_tag_object) {
+        // create a GitTag object
+        auto tag = std::make_unique<GitTag>();
+
+        // prepare the KVLM data for the tag
+        KVLM kvlm;
+        kvlm["object"] = sha;
+        kvlm["type"] = "commit";
+        kvlm["tag"] = name;
+        kvlm["tagger"] = "silt <silt@example.com>";
+        kvlm[""] = "Some message, change later maybe?";
+
+        // Set the kvlm for the tag
+        std::string serialized_tag = kvlm_serialize(kvlm);
+        tag->deserialize(serialized_tag);
+
+        // write the tag object via object_write
+        std::string tag_sha = object_write(std::move(tag), repo);
+
+        // create ref via ref_create, pass repo, "refs/tags/" + name, tag_sha
+        ref_create(repo, "refs/tags/" + name, tag_sha);
+    } else {
+        // create ref via ref_create, pass repo, "refs/tags/" + name, sha
+        ref_create(repo, "refs/tags/" + name, sha);
+    }
+}
+
+// ref_create(repo, ref_name, sha)
+void ref_create(Repository* repo, const std::string& ref_name, const std::string& sha) {
+    // Open repo_file(repo, ref_name) and write sha
+    std::filesystem::path ref_path = repo_file(*repo, ref_name.c_str(), nullptr);
+
+    std::ofstream file(ref_path);
+    file << sha << std::endl;
+    file.close();
 }

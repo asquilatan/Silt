@@ -484,8 +484,11 @@ std::vector<GitTreeLeaf> tree_parse(const std::string& raw) {
 // tree_leaf_sort_key
 std::string tree_leaf_sort_key(const GitTreeLeaf& leaf) {
     // if it starts with 10, return leaf path
+    if (leaf.mode.substr(0, 2) == "10") {
+        return leaf.path;
+    }
     // otherwise, return leaf path + '/'
-    
+    return leaf.path + "/";
 }
 
 // tree_serialize
@@ -540,7 +543,6 @@ bool GitTree::empty() const {
 }
 
 void GitTree::initialize() {
-    // This method can be used to initialize an empty tree
     leaves.clear();
 }
 
