@@ -661,7 +661,7 @@ void cmd_tag(const ParsedArgs& args, Repository* repo) {
 
     // if name is not empty
     if (!name.empty()) {
-        bool append_flag = parse_bool_flag(args, "append");
+        bool append_flag = parse_bool_flag(args, "annotate");
         tag_create(repo, name, object, append_flag);
     } else {
         std::map<std::string, std::string> refs = ref_list(*repo, repo->gitdir / "refs" / "tags");
