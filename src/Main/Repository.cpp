@@ -234,6 +234,13 @@ std::optional<Repository> repo_find(std::filesystem::path path, bool required) {
 }
 
 
+// resolve the reference to its canonical value
+// for example:
+// input: repo, "HEAD" (HEAD points to ref: refs/heads/master, which points to a94a8fe2b1cd9...)
+// output: "a94a8fe2b1cd9..."
+// input: repo, "refs/heads/master"
+// output: "a94a8fe2b1cd9..."
+
 std::optional<std::string> ref_resolve(const Repository& repo, const std::string& ref) {
     // get the path via repo file
     std::filesystem::path path = repo.gitdir / ref;

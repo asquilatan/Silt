@@ -623,7 +623,15 @@ void ls_tree(Repository* repo, const GitTree& tree, const std::string& prefix, b
 }
 
 void cmd_rev_parse(const ParsedArgs& args, Repository* repo) {
-    std::cout << "rev-parse command not yet implemented" << std::endl;
+    std::string fmt = "";
+    // if the user gave a type
+    if (args.exists("type")) {
+        // use the type, otherwise use the default
+        fmt = args.get("type");
+    }
+
+    // call object_find, this prints the sha of the object
+    std::cout << object_find(repo, args.get("name"), fmt, true) << std::endl;
 }
 
 void cmd_show_ref(const ParsedArgs& args, Repository* repo) {

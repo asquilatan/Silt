@@ -132,6 +132,10 @@ public:
     std::string get_fmt() const override {
         return "commit";
     }
+
+    const KVLM& get_kvlm() const {
+        return kvlm;
+    }
 private:
     KVLM kvlm;
 };
@@ -177,6 +181,8 @@ public:
 std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo = nullptr);
 
 std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sha);
+
+std::vector<std::string> object_resolve(Repository* repo, std::string name);
 
 std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow=true);
 

@@ -15,6 +15,7 @@
 #include <iterator>
 #include <algorithm>
 #include <iostream>
+#include <regex>
 #include "Objects.hpp"  // Include the header file to get KVLM types
 
 // Implement the GitBlob constructor that takes a string
@@ -24,6 +25,9 @@ GitBlob::GitBlob(const std::string& data) {
 
 std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo);
 
+// Implement the GitBlob constructor that takes a string
+// For example: 
+// 
 std::optional<std::unique_ptr<GitObject>> object_read(Repository* repo, char* sha) {
     // first 2 digits of sha
     char* dirname = new char[3];
@@ -223,59 +227,177 @@ std::string object_write(std::unique_ptr<GitObject> obj, Repository* repo) {
 }
 
 
-std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow) {
-    // If name is empty, return it as is
+/**
+* Create an array list of candidates.
+* Candidates will look like this after: 
+* [a94a8fe2b1cd9..., a94a8f56cc6ae..., a94a8f439c9fed3a...]
+*/
+std::vector<std::string> object_resolve(Repository* repo, std::string name) {
+    std::vector<std::string> candidates;
+
+    // create a regex to match hash
+    std::regex hashRE("^[0-9A-Fa-f]{4,40}$");
+
+    // if it's empty, return empty vector
     if (name.empty()) {
-        return name;
+        return {};
     }
 
-    // If name is "HEAD", resolve it to the actual commit SHA
+    // if it's HEAD, resolve it to whatever branch HEAD points to, returns a sha
     if (name == "HEAD") {
-        // Read the .git/HEAD file to get the reference
-        std::filesystem::path head_path = repo->gitdir / "HEAD";
+        auto head = ref_resolve(*repo, "HEAD");
+        // if head contains a value, return it in a vector
+        if (head) {
+            return { *head };
+        }
+        // otherwise, return an empty vector
+        return {};
+    }
 
-        if (std::filesystem::exists(head_path)) {
-            std::ifstream head_file(head_path);
-            std::string head_content((std::istreambuf_iterator<char>(head_file)),
-                                   std::istreambuf_iterator<char>());
-
-            // Remove any trailing newlines
-            if (!head_content.empty() && head_content.back() == '\n') {
-                head_content.pop_back();
-            }
-
-            // HEAD usually contains something like "ref: refs/heads/main"
-            if (head_content.substr(0, 5) == "ref: ") {
-                // Extract the reference part
-                std::string ref = head_content.substr(5); // "refs/heads/main"
-
-                // Read the reference file to get the commit SHA
-                std::filesystem::path ref_path = repo->gitdir / ref;
-
-                if (std::filesystem::exists(ref_path)) {
-                    std::ifstream ref_file(ref_path);
-                    std::string sha((std::istreambuf_iterator<char>(ref_file)),
-                                  std::istreambuf_iterator<char>());
-
-                    // Remove any trailing newlines
-                    if (!sha.empty() && sha.back() == '\n') {
-                        sha.pop_back();
-                    }
-
-                    return sha;
-                } else {
-                    throw std::runtime_error("Reference file does not exist: " + ref);
+    // if it's a match, add it to the candidates
+    if (std::regex_match(name, hashRE)) {
+        // convert the name to lowercase
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        // takes the first 2 characters of the name
+        std::string prefix = name.substr(0, 2);
+        // creates a path to the directory containing the object, (e.g. .git/objects/a9)
+        std::filesystem::path path = repo_dir(*repo, false, "objects", prefix.c_str(), nullptr);
+        
+        // if the path exists, iterate over the directory and add the filename to the candidates
+        if (std::filesystem::exists(path)) {
+            // take everything after the first 2 characters
+            std::string rem = name.substr(2);
+            // for each entry int he directory
+            for (const auto& entry : std::filesystem::directory_iterator(path)) {
+                // take the filename of the entry
+                std::string filename = entry.path().filename().string();
+                // if the filename starts with the remaining characters of the name, add it to the candidates
+                if (filename.find(rem) == 0) {
+                    // add the prefix and filename to the candidates
+                    candidates.push_back(prefix + filename);
                 }
-            } else {
-                // If HEAD doesn't start with "ref: ", it might contain a SHA directly
-                return head_content;
             }
-        } else {
-            throw std::runtime_error("HEAD file does not exist");
         }
     }
 
-    return name;
+    // if it's not a hash, it's a reference, resolve it to a sha
+    auto as_tag = ref_resolve(*repo, "refs/tags/" + name);
+    if (as_tag) {
+        candidates.push_back(*as_tag);
+    }
+
+    // if it's not a tag, it's a branch, resolve it to a sha
+    auto as_branch = ref_resolve(*repo, "refs/heads/" + name);
+    if (as_branch) {
+        candidates.push_back(*as_branch);
+    }
+    // if it's not a branch, it's a remote branch, resolve it to a sha
+    auto as_remote_branch = ref_resolve(*repo, "refs/remotes/" + name);
+    if (as_remote_branch) {
+        candidates.push_back(*as_remote_branch);
+    }
+
+    // return the vector of candidates
+    return candidates;
+}
+
+
+/**
+ * Find an object with a given name in the repository.
+ * For example:
+ * 
+ */
+std::string object_find(Repository* repo, std::string name, std::string fmt, bool follow) {
+    // create a vector of candidates
+    auto sha_list = object_resolve(repo, name);
+
+    // if there are no candidates, throw an error
+    // {}
+    if (sha_list.empty()) {
+        throw std::runtime_error("No such reference " + name + ".");
+    }
+
+    // if the size is greater than 1, throw an error including all candidates
+    // {a94a8fe2b1cd9..., a94a8f56cc6ae...}
+    if (sha_list.size() > 1) {
+        std::string candidates_str;
+        for (const auto& s : sha_list) {
+            candidates_str += "\n - " + s;
+        }
+        throw std::runtime_error("Ambiguous reference " + name + ": Candidates are:" + candidates_str + ".");
+    }
+
+    // let the sha be the first item (because there's only ONE)
+    std::string sha = sha_list[0];
+
+    // if no format is specified, return the sha
+    // this would be used when just resolving a reference without caring about type
+    // if fmt is empty, [a94a8fe2b1cd9...] -> return a94a8fe2b1cd9...
+    if (fmt.empty()) {
+        return sha;
+    }
+
+    // if the format is specified, read the object and check the type
+    while (true) {
+        // read the object
+        auto obj_opt = object_read(repo, const_cast<char*>(sha.c_str()));
+        // if the object is not found, return an empty string
+        if (!obj_opt) {
+             return ""; 
+        }
+
+        // the object is found, get the object
+        auto& obj = *obj_opt;
+
+        // get the object format
+        std::string obj_fmt = obj->get_fmt();
+
+        // if the object format matches the requested format, return the sha
+        if (obj_fmt == fmt) {
+            return sha;
+        }
+
+        // if we're not following, return an empty string
+        if (!follow) {
+            return "";
+        }
+
+        // Helper lambda to extract a string field from KVLM
+        auto get_kvlm_field = [](const KVLM& kvlm, const std::string& key) -> std::optional<std::string> {
+            // get the iterator for the key
+            auto it = kvlm.find(key);
+            // if the iterator is valid and the value is a string, return the string
+            if (it != kvlm.end() && std::holds_alternative<std::string>(it->second)) {
+                return std::get<std::string>(it->second);
+            }
+            // otherwise, return nullopt
+            return std::nullopt;
+        };
+
+        std::optional<std::string> next_sha;
+        
+        // if the object is a tag, get the object field
+        if (obj_fmt == "tag") {
+            if (auto tag = dynamic_cast<GitTag*>(obj.get())) {
+                next_sha = get_kvlm_field(tag->get_kvlm(), "object");
+            }
+        // if the object is a commit and the requested format is tree, get the tree field
+        } else if (obj_fmt == "commit" && fmt == "tree") {
+            if (auto commit = dynamic_cast<GitCommit*>(obj.get())) {
+                next_sha = get_kvlm_field(commit->get_kvlm(), "tree");
+            }
+        }
+
+        // if we have a next sha, set sha to the next sha
+        if (next_sha) {
+            sha = *next_sha;
+        // otherwise, return an empty string
+        } else {
+            return "";
+        }
+    }
+    // return an empty string
+    return "";
 }
 
 std::string object_hash(const std::string& data, const std::string& fmt, Repository* repo) {
