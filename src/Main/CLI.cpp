@@ -501,6 +501,17 @@ void setup_parser(Parser& parser) {
         false
     ));
 
+    commit_cmd->add_argument(std::make_unique<Argument>(
+        "message",
+        1,
+        "Use the given message as the commit message",
+        true,
+        "",
+        "m",
+        "message",
+        false
+    ));
+
     ls_tree_cmd->add_argument(std::make_unique<Argument> (
         "recursive",
         0,                   // flag (no value)
@@ -618,6 +629,11 @@ void setup_parser(Parser& parser) {
     parser.add_command(std::move(cat_file_cmd));
     parser.add_command(std::move(hash_object_cmd));
     parser.add_command(std::move(log_cmd));
+    parser.add_command(std::move(commit_cmd));
+    parser.add_command(std::move(ls_files_cmd));
+    parser.add_command(std::move(status_cmd));
+    parser.add_command(std::move(rm_cmd));
+    parser.add_command(std::move(check_ignore_cmd));
     parser.add_command(std::move(ls_tree_cmd));
     parser.add_command(std::move(checkout_cmd));
     parser.add_command(std::move(show_ref_cmd));

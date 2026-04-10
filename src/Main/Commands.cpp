@@ -5,11 +5,18 @@
 #include <string> // Include the header for GitObject and related functions
 #include "Objects.hpp"
 #include "Repository.hpp" // Include the header for Repository
+#include "Index.hpp"
 #include <filesystem>
 #include <set>
 #include <map>
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <ctime>
+#include <cstdio>
+#include <sys/stat.h>
+#include <zlib.h>
+#include <openssl/sha.h>
 
 // Helper to parse boolean flags from ParsedArgs:
 // - If the flag is not present, return false.
@@ -29,34 +36,246 @@ bool parse_bool_flag(const ParsedArgs& args, const std::string& key) {
     return (lower == "true" || lower == "1" || lower == "yes" || lower == "on");
 }
 
-// Implementation of cmd_add to handle multiple paths from positional_args
-void cmd_add(const ParsedArgs& args, Repository* repo) {
-    // Get the file argument if provided specifically with -f flag
-    std::string specific_file = args.get("file");
+std::string write_raw_object(const std::string& fmt, const std::string& data, Repository* repo) {
+    std::string full_object = fmt + " " + std::to_string(data.size()) + '\0' + data;
 
-    // Get paths from positional arguments (for multiple files passed without flags)
-    std::vector<std::string> paths = args.positional_args;
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1(reinterpret_cast<const unsigned char*>(full_object.data()), full_object.size(), hash);
 
-    // If positional arguments are empty and a specific file was given (which might be the default)
-    if (paths.empty() && !specific_file.empty()) {
-        paths.push_back(specific_file);
+    char sha_hex[41];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        std::snprintf(sha_hex + (i * 2), 3, "%02x", hash[i]);
+    }
+    sha_hex[40] = '\0';
+    std::string sha(sha_hex);
+
+    std::string dir = sha.substr(0, 2);
+    std::string file = sha.substr(2);
+    std::filesystem::path object_path = repo_file(*repo, "objects", dir.c_str(), file.c_str(), nullptr);
+
+    if (!std::filesystem::exists(object_path)) {
+        std::filesystem::create_directories(object_path.parent_path());
+
+        uLongf compressed_size = compressBound(full_object.size());
+        std::vector<char> compressed_data(compressed_size);
+        if (compress(reinterpret_cast<Bytef*>(compressed_data.data()), &compressed_size,
+                     reinterpret_cast<const Bytef*>(full_object.data()), full_object.size()) != Z_OK) {
+            throw std::runtime_error("Failed to compress object data.");
+        }
+
+        std::ofstream out(object_path, std::ios::binary);
+        out.write(compressed_data.data(), compressed_size);
+        out.close();
     }
 
-    // If no paths were provided at all (neither positional nor via options)
+    return sha;
+}
+
+struct TreeNode {
+    std::map<std::string, TreeNode> children;
+    std::map<std::string, std::pair<std::string, std::string>> files; // filename -> (mode, blob sha)
+};
+
+std::vector<std::string> split_git_path(const std::string& path) {
+    std::vector<std::string> parts;
+    std::string current;
+    for (char c : path) {
+        if (c == '/' || c == '\\') {
+            if (!current.empty()) {
+                parts.push_back(current);
+                current.clear();
+            }
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty()) {
+        parts.push_back(current);
+    }
+    return parts;
+}
+
+std::string write_tree_recursive(const TreeNode& node, Repository* repo) {
+    std::vector<GitTreeLeaf> leaves;
+
+    for (const auto& [name, file] : node.files) {
+        leaves.emplace_back(file.first, name, file.second);
+    }
+
+    for (const auto& [dirname, child] : node.children) {
+        std::string child_sha = write_tree_recursive(child, repo);
+        leaves.emplace_back("40000", dirname, child_sha);
+    }
+
+    auto tree = std::make_unique<GitTree>();
+    tree->set_leaves(leaves);
+    return object_write(std::move(tree), repo);
+}
+
+std::string build_tree_from_index(const std::vector<IndexEntry>& entries, Repository* repo) {
+    TreeNode root;
+
+    auto mode_for_tree = [](int mode) -> std::string {
+        int type = mode & 0170000;
+        if (type == 0160000) {
+            return "160000";
+        }
+        if (type == 0120000) {
+            return "120000";
+        }
+        if (mode & 0111) {
+            return "100755";
+        }
+        return "100644";
+    };
+
+    for (const auto& entry : entries) {
+        std::vector<std::string> parts = split_git_path(entry.path);
+        if (parts.empty()) {
+            continue;
+        }
+
+        TreeNode* node = &root;
+        for (size_t i = 0; i + 1 < parts.size(); i++) {
+            node = &node->children[parts[i]];
+        }
+        node->files[parts.back()] = {mode_for_tree(entry.mode), entry.sha};
+    }
+
+    return write_tree_recursive(root, repo);
+}
+
+std::string head_target_ref(const Repository& repo) {
+    std::ifstream head_file(repo.gitdir / "HEAD");
+    std::string head_data;
+    std::getline(head_file, head_data);
+
+    if (!head_data.empty() && head_data.back() == '\r') {
+        head_data.pop_back();
+    }
+
+    if (head_data.rfind("ref: ", 0) == 0) {
+        return head_data.substr(5);
+    }
+    return "refs/heads/master";
+}
+
+std::string branch_name_from_ref(const std::string& ref_name) {
+    size_t pos = ref_name.find_last_of('/');
+    if (pos == std::string::npos || pos + 1 >= ref_name.size()) {
+        return ref_name;
+    }
+    return ref_name.substr(pos + 1);
+}
+
+// Implementation of cmd_add to stage files to the index
+void cmd_add(const ParsedArgs& args, Repository* repo) {
+    // Get paths from positional arguments (for multiple files passed without flags)
+    std::vector<std::string> paths = args.positional_args;
+    
+    // If no paths were provided, default to "."
     if (paths.empty()) {
         paths.push_back(".");
     }
-
+    
+    // Load or create index
+    Index index(*repo);
+    
     // Process each path
-    for (const auto& path : paths) {
-        std::cout << "Would add: " << path << std::endl;
+    for (const auto& path_str : paths) {
+        std::filesystem::path path(path_str);
+        
+        // If path is relative, make it relative to repo worktree
+        if (path.is_relative()) {
+            path = repo->worktree / path;
+        }
+        
+        // Handle directories and files recursively
+        if (std::filesystem::is_directory(path)) {
+            // Add all files in directory recursively
+            for (const auto& file_entry : std::filesystem::recursive_directory_iterator(path)) {
+                if (file_entry.is_regular_file()) {
+                    // Get path relative to worktree
+                    auto rel_path = std::filesystem::relative(file_entry.path(), repo->worktree);
+                    
+                    // Skip files in .git directory
+                    if (rel_path.string().find(".git") == 0) {
+                        continue;
+                    }
+                    
+                    // Read file and compute hash
+                    std::ifstream file(file_entry.path(), std::ios::binary);
+                    std::string content((std::istreambuf_iterator<char>(file)),
+                                       std::istreambuf_iterator<char>());
+                    file.close();
+                    
+                    // Hash the blob
+                    std::string sha = object_hash(content, "blob", repo);
+                    
+                    // Create index entry
+                    IndexEntry index_entry;
+                    index_entry.path = rel_path.generic_string();
+                    
+                    // Get file stats using the actual file path
+                    struct stat st;
+                    if (stat(file_entry.path().string().c_str(), &st) == 0) {
+                        index_entry.ctime_sec = static_cast<int>(st.st_ctime);
+                        index_entry.mtime_sec = static_cast<int>(st.st_mtime);
+                        index_entry.mode = static_cast<int>(st.st_mode);
+                        index_entry.uid = static_cast<int>(st.st_uid);
+                        index_entry.gid = static_cast<int>(st.st_gid);
+                        index_entry.file_size = static_cast<int>(st.st_size);
+                    }
+                    
+                    index_entry.sha = sha;
+                    index_entry.flags = static_cast<int>(index_entry.path.size() & 0xFFF); // Bit 0-11: name length
+                    
+                    // Add to index
+                    index.add_entry(index_entry);
+                }
+            }
+        } else if (std::filesystem::is_regular_file(path)) {
+            // Single file
+            auto rel_path = std::filesystem::relative(path, repo->worktree);
+            
+            // Read file and compute hash
+            std::ifstream file(path, std::ios::binary);
+            std::string content((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+            file.close();
+            
+            // Hash the blob
+            std::string sha = object_hash(content, "blob", repo);
+            
+            // Create index entry
+            IndexEntry entry;
+            entry.path = rel_path.generic_string();
+            
+            // Get file stats
+            struct stat st;
+            if (stat(path.string().c_str(), &st) == 0) {
+                entry.ctime_sec = static_cast<int>(st.st_ctime);
+                entry.mtime_sec = static_cast<int>(st.st_mtime);
+                entry.mode = static_cast<int>(st.st_mode);
+                entry.uid = static_cast<int>(st.st_uid);
+                entry.gid = static_cast<int>(st.st_gid);
+                entry.file_size = static_cast<int>(st.st_size);
+            }
+            
+            entry.sha = sha;
+            entry.flags = static_cast<int>(entry.path.size() & 0xFFF);
+            
+            // Add to index
+            index.add_entry(entry);
+        }
     }
-
-    // if the verbose flag is on
-    if (args.exists("verbose") && args.get("verbose") == "true") {
-        std::cout << "Verbose mode enabled." << std::endl;
+    
+    // Write index back to disk
+    if (index.write(*repo)) {
+        std::cout << "Index updated." << std::endl;
+    } else {
+        std::cerr << "Error: Failed to write index." << std::endl;
     }
-
 }
 
 // Implementation of cmd_check_ignore to handle multiple paths
@@ -304,7 +523,52 @@ void tree_checkout(Repository* repo, const GitTree& tree, const std::filesystem:
 }
 
 void cmd_commit(const ParsedArgs& args, Repository* repo) {
-    std::cout << "commit command not yet implemented" << std::endl;
+    // Get commit message
+    std::string message = args.get("message");
+    
+    if (message.empty()) {
+        std::cerr << "Error: Commit message required (-m flag)" << std::endl;
+        return;
+    }
+    
+    // Load index
+    Index index(*repo);
+    const auto& entries = index.get_entries();
+    
+    if (entries.empty()) {
+        std::cerr << "Error: nothing to commit" << std::endl;
+        return;
+    }
+    
+    // Build nested trees from index paths and write the root tree object.
+    std::string tree_sha = build_tree_from_index(entries, repo);
+    
+    // Get parent commit (HEAD)
+    auto head_ref = ref_resolve(*repo, "HEAD");
+    std::string parent_sha;
+    if (head_ref.has_value()) {
+        parent_sha = head_ref.value();
+    }
+    
+    // Create commit object with Git-compatible header order:
+    // tree, parent(s), author, committer, blank line, message
+    std::string author_line = "Silt User <silt@example.com> " + std::to_string(std::time(nullptr)) + " +0000";
+    std::string commit_data = "tree " + tree_sha + "\n";
+    if (!parent_sha.empty()) {
+        commit_data += "parent " + parent_sha + "\n";
+    }
+    commit_data += "author " + author_line + "\n";
+    commit_data += "committer " + author_line + "\n\n";
+    commit_data += message + "\n";
+    
+    // Write commit object
+    std::string commit_sha = write_raw_object("commit", commit_data, repo);
+    
+    // Update the reference that HEAD points to (e.g. refs/heads/main).
+    std::string target_ref = head_target_ref(*repo);
+    ref_create(repo, target_ref, commit_sha);
+    
+    std::cout << "[" << branch_name_from_ref(target_ref) << " " << commit_sha.substr(0, 7) << "] " << message << std::endl;
 }
 
 void cmd_hash_object(const ParsedArgs& args, Repository* repo) {
@@ -475,7 +739,18 @@ std::string log_graphviz(Repository* repo, std::string sha, std::set<std::string
 }
 
 void cmd_ls_files(const ParsedArgs& args, Repository* repo) {
-    std::cout << "ls-files command not yet implemented" << std::endl;
+    // Load index
+    Index index(*repo);
+    
+    // Get all entries
+    const auto& entries = index.get_entries();
+    
+    // Print each entry
+    for (const auto& entry : entries) {
+        // Print: [mode] [object] [stage] [file]
+        // Format similar to: 100644 blob_sha 0	filename
+        printf("%06o %s %d\t%s\n", entry.mode, entry.sha.substr(0, 7).c_str(), 0, entry.path.c_str());
+    }
 }
 
 void cmd_ls_tree(const ParsedArgs& args, Repository* repo) {
@@ -652,7 +927,111 @@ void show_ref(Repository* repo, const std::map<std::string, std::string>& refs, 
 }
 
 void cmd_status(const ParsedArgs& args, Repository* repo) {
-    std::cout << "status command not yet implemented" << std::endl;
+    // Load index
+    Index index(*repo);
+    
+    // Get current HEAD commit
+    auto head_ref = ref_resolve(*repo, "HEAD");
+    std::string head_sha;
+    if (head_ref.has_value()) {
+        head_sha = head_ref.value();
+    }
+    
+    std::cout << "On branch master" << std::endl;
+    
+    // Section 1: Changes to be committed (index vs HEAD)
+    bool has_staged = false;
+    if (!head_sha.empty()) {
+        auto commit_obj = object_read(repo, const_cast<char*>(head_sha.c_str()));
+        if (commit_obj.has_value()) {
+            GitCommit* commit = dynamic_cast<GitCommit*>(commit_obj->get());
+            if (commit) {
+                // Would compare index with HEAD tree
+                // For now, just list index entries as staged
+                const auto& entries = index.get_entries();
+                if (!entries.empty()) {
+                    has_staged = true;
+                    std::cout << "\nChanges to be committed:" << std::endl;
+                    std::cout << "  (use \"git reset HEAD <file>...\" to unstage)" << std::endl;
+                    for (const auto& entry : entries) {
+                        std::cout << "\tmodified:   " << entry.path << std::endl;
+                    }
+                }
+            }
+        }
+    } else {
+        // Initial commit - all staged files are new
+        const auto& entries = index.get_entries();
+        if (!entries.empty()) {
+            has_staged = true;
+            std::cout << "\nChanges to be committed:" << std::endl;
+            std::cout << "  (use \"git reset HEAD <file>...\" to unstage)" << std::endl;
+            for (const auto& entry : entries) {
+                std::cout << "\tnew file:   " << entry.path << std::endl;
+            }
+        }
+    }
+    
+    // Section 2: Changes not staged (worktree vs index)
+    bool has_unstaged = false;
+    const auto& entries = index.get_entries();
+    for (const auto& entry : entries) {
+        std::filesystem::path file_path = repo->worktree / entry.path;
+        
+        // Check if file still exists
+        if (!std::filesystem::exists(file_path)) {
+            if (!has_unstaged) {
+                has_unstaged = true;
+                std::cout << "\nChanges not staged for commit:" << std::endl;
+                std::cout << "  (use \"git add <file>...\" to update what will be committed)" << std::endl;
+            }
+            std::cout << "\tdeleted:    " << entry.path << std::endl;
+        } else {
+            // Check if file content changed
+            std::ifstream file(file_path, std::ios::binary);
+            std::string content((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+            file.close();
+            
+            std::string sha = object_hash(content, "blob", nullptr);
+            if (sha != entry.sha) {
+                if (!has_unstaged) {
+                    has_unstaged = true;
+                    std::cout << "\nChanges not staged for commit:" << std::endl;
+                    std::cout << "  (use \"git add <file>...\" to update what will be committed)" << std::endl;
+                }
+                std::cout << "\tmodified:   " << entry.path << std::endl;
+            }
+        }
+    }
+    
+    // Section 3: Untracked files
+    bool has_untracked = false;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(repo->worktree)) {
+        if (entry.is_regular_file()) {
+            auto rel_path = std::filesystem::relative(entry.path(), repo->worktree);
+            
+            // Skip .git directory and files already in index
+            if (rel_path.string().find(".git") == 0) {
+                continue;
+            }
+            
+            auto index_entry = index.get_entry(rel_path.string());
+            if (!index_entry.has_value()) {
+                if (!has_untracked) {
+                    has_untracked = true;
+                    std::cout << "\nUntracked files:" << std::endl;
+                    std::cout << "  (use \"git add <file>...\" to include in what will be committed)" << std::endl;
+                }
+                std::cout << "\t" << rel_path.string() << std::endl;
+            }
+        }
+    }
+    
+    // Summary
+    if (!has_staged && !has_unstaged && !has_untracked) {
+        std::cout << "\nnothing to commit, working tree clean" << std::endl;
+    }
 }
 
 void cmd_tag(const ParsedArgs& args, Repository* repo) {
@@ -724,7 +1103,8 @@ void ref_create(Repository* repo, const std::string& ref_name, const std::string
     // Open repo_file(repo, ref_name) and write sha
     std::filesystem::path ref_path = repo_file(*repo, ref_name.c_str(), nullptr);
 
-    std::ofstream file(ref_path);
-    file << sha << std::endl;
+    // Write refs with LF-only to stay compatible with Git parsing on Windows.
+    std::ofstream file(ref_path, std::ios::binary);
+    file << sha << "\n";
     file.close();
 }
